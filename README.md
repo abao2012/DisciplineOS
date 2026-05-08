@@ -1,202 +1,246 @@
 # DisciplineOS
 
-DisciplineOS 是一个本地优先、数据源无关的个人投资纪律系统。它不荐股、不预测股价、不替用户交易，而是帮助投资者把模糊的投资判断转化为可执行、可审计、可复盘的纪律流程。
+DisciplineOS 是一个本地优先的个人投资纪律系统。它不荐股、不预测价格、不替用户交易，而是帮助投资者把“事前写下的纪律”落实到数据、证据、仓位、决策审查、记录和复盘流程里。
 
-> Most investment tools track what you own. DisciplineOS governs how you decide.
+一句话概括：**DisciplineOS 不回答“这只股票会不会涨”，它回答“这次操作是否符合我事先定义的纪律”。**
 
-## 当前实现状态
+## 当前定位
 
-本项目已经从白皮书原型推进为一个可运行的本地 Web 工作台和 Python 服务。当前覆盖的核心闭环包括：
+本项目目前是一个可运行的本地 Web 应用和 Python 后端原型，适合用于个人投资纪律管理、交易前自查、证据归档和月度复盘。
 
-- 投资者纪律画像
-- 纪律卡问答式生成器
-- 价值、成长、周期、趋势、ETF 模板
-- 持仓管理
-- CSV / Excel 持仓导入
-- CSV / Excel 交易流水导入
-- 仓位治理 Position Guard
-- 交易前决策审查 Decision Gate
-- 规则引擎 Rule Engine
-- 违规账本 Violation Ledger
-- 加权纪律评分 Discipline Score
-- 月度复盘 Review Engine
-- 本地 Copilot 草稿层
-- 财报证据摘要 Financial Report Agent
-- 中英文 UI 切换
+它不是：
 
-系统仍然坚持白皮书边界：它只审查“是否符合你事先定义的纪律”，不判断“会不会赚钱”。
+- 投资顾问系统
+- 荐股工具
+- 自动交易系统
+- 收益预测系统
+- 目标价生成器
 
-## 快速开始
+## 核心功能
 
-### 方式一：安装后运行
+- 本地 Web UI：默认运行在 `http://127.0.0.1:8765/`
+- 中英文界面切换
+- 纪律卡生成器
+- 纪律卡库
+- 投资者画像
+- 数据源中心
+- 信息解读中心
+- 证据引擎
+- 决策闸门
+- 副驾驶
+- 持仓簿
+- 仓位护栏
+- 交易流水
+- 决策历史
+- 违规台账
+- 月度复盘
+- 系统设置、AI 配置、备份与恢复、系统状态检查
 
-```powershell
-cd D:\project\DisciplineOS_Architecture_Whitepaper
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
-pytest
-disciplineos web --data-dir .\data
-```
+## 七层结构
 
-然后打开：
+当前 UI 按以下七层组织：
 
-```text
-http://127.0.0.1:8765
-```
+1. 规则层
+   - 纪律卡生成器
+   - 纪律卡库
+   - 投资者画像
 
-### 方式二：不安装，直接运行源码
+2. 数据与信息层
+   - 数据源中心
+   - 信息解读中心
 
-```powershell
-cd D:\project\DisciplineOS_Architecture_Whitepaper
-$env:PYTHONPATH = "src"
-python -m disciplineos.cli web --data-dir .\data
-```
+3. 证据与分析层
+   - 证据引擎
+   - 财报证据保存区
+   - 副驾驶
 
-如果 PowerShell 中文显示乱码，可以先执行：
+4. 决策执行层
+   - 决策闸门
 
-```powershell
-chcp 65001
-```
+5. 持仓与风控层
+   - 持仓簿
+   - 当前持仓
+   - 仓位护栏
 
-## 常用命令
+6. 记录与复盘层
+   - 交易流水
+   - 决策历史
+   - 违规台账
+   - 月度复盘
 
-运行测试：
+7. 系统支撑层
+   - 系统设置
+   - AI 配置
+   - 本地备份与恢复
+   - 系统状态
 
-```powershell
-.\.venv\Scripts\pytest.exe
-```
+页面顶部的纪律评分、决策检查次数、本月状态是全局摘要，不属于某个单独业务层。
 
-启动 Web UI：
+## 纪律卡生成器
 
-```powershell
-.\.venv\Scripts\disciplineos.exe web --data-dir .\data
-```
+纪律卡生成器当前不是 6 个问题，而是 **8 个编号问题 + 禁止行为**。
 
-载入示例数据：
+基础字段：
 
-```powershell
-.\.venv\Scripts\disciplineos.exe demo --data-dir .\data
-```
+- 标的代码
+- 标的名称
+- 行业 / 主题
+- 最大仓位比例
+- 复盘周期
 
-审查一个决策 JSON：
-
-```powershell
-.\.venv\Scripts\disciplineos.exe check .\examples\sample_decision.json --data-dir .\data
-```
-
-生成月度复盘：
-
-```powershell
-.\.venv\Scripts\disciplineos.exe review --month 2026-04 --data-dir .\data
-```
-
-## Web UI 使用说明
-
-### 1. 语言切换
-
-页面右上角可以在 English / 中文之间切换。选择会保存在浏览器 `localStorage`，刷新后保持。
-
-### 2. Discipline Card Generator
-
-用于从六个核心问题生成纪律卡：
+8 个编号问题：
 
 1. 为什么买？
-2. 最多买多少？
-3. 什么情况下不买？
-4. 什么情况下加仓？
-5. 什么情况下减仓？
-6. 什么情况说明我错了？
+2. 我最多可以买多少？
+3. 什么条件下不买？
+4. 什么情况下可以加仓？
+5. 什么情况下必须减仓？
+6. 什么情况下可以提高仓位上限？
+7. 什么情况下必须降低仓位上限？
+8. 什么情况证明我错了？
 
-支持模板：
+额外纪律项：
 
-- Value
-- Growth
-- Cyclical
-- Trend
-- ETF
+- 禁止行为
 
-生成后的纪律卡会保存到 Discipline Card Library，并可作为草稿再次编辑。
+生成后的纪律卡会保存到纪律卡库，并在决策闸门、证据引擎和复盘流程中被引用。
 
-### 3. Decision Gate
+## 投资者画像
 
-交易前审查模块。选择已有标的后，填写：
+投资者画像用于定义全局约束：
 
-- 操作类型：买入、加仓、减仓、清仓
-- 操作金额
-- 操作理由
-- 新增证据
-- 当前情绪状态
-- 是否财报前
-- 投资逻辑是否变化
-
-默认会根据当前持仓自动计算操作前后仓位，并由规则引擎输出：
-
-- `PASS`
-- `WARN`
-- `BLOCKED`
-
-### 4. Data Import
-
-支持从本地 CSV / Excel 导入：
-
-- positions：持仓
-- trades：交易流水
-
-示例文件：
-
-```text
-examples/positions.csv
-examples/trades.csv
-```
-
-UI 中填写本地绝对路径即可，例如：
-
-```text
-D:\project\DisciplineOS_Architecture_Whitepaper\examples\positions.csv
-```
-
-### 5. Financial Report Agent
-
-本地财报证据摘要工具。可输入：
-
-- 本地 Markdown / text 文件路径
-- 直接粘贴财报文本
-
-它会提取：
-
-- 收入
-- 利润
-- 毛利率
-- 现金流
-- 管理层指引 / 展望
-
-输出只作为“证据摘要”，不构成投资建议。
-
-示例文件：
-
-```text
-examples/financial_report_sample.md
-```
-
-### 6. Investor Profile
-
-维护投资者纪律画像：
-
-- 投资风格
-- 单标的仓位上限
+- 名称
+- 价值风格占比
+- 成长风格占比
+- 周期风格占比
+- 红利风格占比
+- 现金 / 防守仓位占比
+- 单一标的仓位上限
 - 行业仓位上限
 - 最大回撤容忍
 - 是否允许财报前加仓
 - 行为弱点
 
-画像会约束纪律卡和决策审查。
+风格占比不要求合计为 100%，但系统会阻止合计超过 100%。
 
-### 7. Position Book
+## 数据源中心
 
-维护当前持仓：
+当前支持的数据源类型：
 
-- 代码
+- QMT
+- TuShare
+- AkShare
+- CSV
+- Excel
+- 手动数据
+
+可同步的数据类型：
+
+- 日 K
+- 5 分钟 K
+- 成交量
+- 财务指标
+- 持仓
+- 交易流水
+
+实现状态：
+
+- CSV / Excel：已实现本地文件导入和证据转换。
+- TuShare：已接入可选连接器，需要安装 `tushare` 并配置 Token。
+- AkShare：已接入可选连接器，需要安装 `akshare`。
+- QMT：当前保存本地路径和状态，但真实 QMT / xtquant 连接器尚未完成。
+
+为避免一次同步全市场数据，数据源同步支持填写个股代码后按标的同步。
+
+## 信息解读中心
+
+信息解读中心用于处理：
+
+- 财报
+- 研报
+- 公告 / 新闻
+- 市场事件
+
+输入方式：
+
+- 选择本地 PDF / Markdown / TXT 文件
+- 粘贴原始文本
+- 可选启用 AI 在线搜索意图
+
+当前实现：
+
+- PDF 文本提取依赖 `pypdf`
+- Markdown / TXT 文本可直接读取
+- DOC / DOCX 解析尚未完整实现
+- 未启用 AI 时使用本地规则摘要
+- 启用 AI 后调用 OpenAI-compatible API，并经过合规护栏处理
+
+解读结果可以保存为证据，也可以生成纪律卡建议。
+
+## 证据引擎
+
+证据可以来自：
+
+- 手动录入
+- 信息解读中心
+- 数据源同步
+
+证据字段包括：
+
+- 标的代码
+- 证据类型
+- 证据标题
+- 证据内容
+- 证据来源
+- 来源日期
+
+证据库通过弹窗查看，不在主页展开全部内容。
+
+## 决策闸门
+
+决策闸门用于交易前审查。
+
+输入项：
+
+- 标的代码
+- 操作类型：买入、加仓、减仓、卖出
+- 金额
+- 当前情绪
+- 操作理由
+- 手动证据
+- 已保存证据项
+- 是否财报前
+- 投资逻辑是否变化
+- 是否自动计算操作前后仓位
+
+审查输出包括：
+
+- `PASS`
+- `WARN`
+- `BLOCKED`
+- `EVIDENCE_REQUIRED`
+- `REVIEW_REQUIRED`
+
+## 规则引擎
+
+当前规则覆盖：
+
+- 单一标的仓位上限
+- 买入 / 加仓必须有证据
+- 情绪化补仓
+- 财报前无计划加仓
+- FOMO
+- 报复性交易
+- 投资逻辑漂移
+- 投资风格漂移
+- 估值约束
+- 重大操作后复盘要求
+
+## 持仓与风控
+
+持仓簿字段：
+
+- 标的代码
 - 名称
 - 资产类型
 - 市场
@@ -207,96 +251,176 @@ examples/financial_report_sample.md
 - 成本价
 - 当前价
 
-### 8. Position Guard
+仓位护栏会计算：
 
-仓位治理模块会自动计算：
-
-- 单标的暴露
+- 单一标的暴露
 - 行业暴露
 - 主题暴露
 - 市场暴露
 - 币种暴露
 
-当单标的或行业接近 / 超过画像上限时，会产生警告。
+当暴露接近或超过投资者画像中的上限时，系统会提示风险。
 
-### 9. Monthly Review
+## 记录与复盘
 
-月度复盘包含：
+系统会记录：
 
-- 加权纪律评分
-- PASS 率
+- 交易流水
+- 决策历史
+- 规则结果
+- 违规台账
+- 月度复盘快照
+- 复盘报告
+
+月度复盘包括：
+
+- 纪律评分
+- PASS 比例
 - 违规类型统计
+- 违规权重
+- 归因分析
 - 下月禁止行为
-- 分项评分
-- 四类归因：
-  - market
-  - security
-  - portfolio
-  - behavior
 - 规则修订建议
+- 快照对比
+- Markdown 报告导出
 
-### 10. Copilot
+## 副驾驶
 
-Copilot 是本地纪律助手，不调用外部 AI API。它基于系统已有数据生成：
+副驾驶是纪律辅助层，不是荐股助手。
 
-- 纪律一致性复盘草稿
-- 逻辑漂移提示
+它可以帮助整理：
+
+- 纪律一致性摘要
+- 投资逻辑漂移提醒
 - 纪律卡修订草稿
-- 下一步动作
+- 下次复盘动作
 
-Copilot 不输出：
+它不会输出：
 
-- 买卖建议
+- 买入建议
+- 卖出建议
 - 目标价
-- 收益预测
-- 确定性判断
+- 确定性收益判断
 
-### 11. Violation Ledger
+## 安装与运行
 
-违规账本记录每次审查触发的问题。每条违规包含：
+要求：
 
-- 类型
-- 分类
-- 严重程度
-- 权重
-- 规则 ID
-- 修正建议
-- open / resolved 状态
+- Python 3.11+
 
-可以在 UI 中将违规标记为 resolved。
+创建虚拟环境：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+```
+
+如果需要 TuShare / AkShare 数据源：
+
+```powershell
+python -m pip install -e ".[dev,data]"
+```
+
+启动 Web UI：
+
+```powershell
+disciplineos web --data-dir .\data
+```
+
+打开：
+
+```text
+http://127.0.0.1:8765/
+```
+
+如果没有安装入口命令，也可以直接运行源码：
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m disciplineos.cli web --data-dir .\data
+```
+
+## 常用命令
+
+加载示例数据：
+
+```powershell
+disciplineos demo --data-dir .\data
+```
+
+审查一个决策 JSON：
+
+```powershell
+disciplineos check .\examples\sample_decision.json --data-dir .\data
+```
+
+生成月度复盘：
+
+```powershell
+disciplineos review --month 2026-05 --data-dir .\data
+```
+
+运行测试：
+
+```powershell
+.\.venv\Scripts\pytest.exe -q
+```
+
+源码编译检查：
+
+```powershell
+.\.venv\Scripts\python.exe -m compileall -q .\src
+```
+
+前端 JavaScript 语法检查：
+
+```powershell
+node --check .\src\disciplineos\static\app.js
+```
 
 ## 数据目录
 
-所有数据默认保存在你启动时指定的 `--data-dir` 中，例如：
+所有本地运行数据默认保存在启动时指定的 `--data-dir` 中，例如：
 
 ```text
 data/
-  profile.json
-  cards.json
-  positions.json
-  trades.json
-  decisions.json
-  audits.json
-  violations.json
-  financial_reports.json
 ```
 
-这是本地优先项目，不需要数据库。
+该目录可能包含：
 
-## CSV 字段格式
+- 本地数据库
+- 纪律卡
+- 持仓
+- 交易流水
+- 证据
+- 决策历史
+- 违规台账
+- AI 配置
+- 备份文件
 
-### positions.csv
+因此 `data/` 已被 `.gitignore` 排除，不应上传到公开仓库。
+
+## 示例文件
+
+```text
+examples/
+  financial_report_sample.md
+  positions.csv
+  sample_decision.json
+  trades.csv
+```
+
+持仓 CSV 字段：
 
 ```csv
 symbol,name,asset_type,market,sector,theme,currency,quantity,cost_price,current_price
-SAMPLE,Sample Asset,stock,HK,technology,AI,HKD,1000,10,10
 ```
 
-### trades.csv
+交易流水 CSV 字段：
 
 ```csv
 symbol,action,quantity,price,amount,fee,traded_at,note
-SAMPLE,buy,1000,10,10000,5,2026-04-10T10:00:00+00:00,Initial position
 ```
 
 `action` 支持：
@@ -310,64 +434,52 @@ SAMPLE,buy,1000,10,10000,5,2026-04-10T10:00:00+00:00,Initial position
 
 ```text
 src/disciplineos/
-  adapters.py              CSV / Excel 导入适配器
-  card_generator.py        纪律卡生成器和模板库
+  adapters.py              CSV / Excel 导入
+  ai_analysis.py           可选 AI 信息解读
+  ai_guardrails.py         AI 输出合规护栏
+  card_generator.py        纪律卡生成器与模板
   cli.py                   命令行入口
-  copilot.py               本地 Copilot 草稿层
-  financial_report.py      财报证据摘要
-  models.py                统一数据模型
-  position_guard.py        仓位治理
-  review_engine.py         月度复盘归因与规则修订建议
+  connectors.py            CSV / Excel / TuShare / AkShare 连接器
+  copilot.py               纪律副驾驶
+  financial_report.py      财报 / 研报 / 新闻材料解读
+  models.py                数据模型
+  position_guard.py        仓位护栏
+  repositories.py          仓储封装
+  review_engine.py         月度复盘
   rules.py                 规则引擎
-  scoring.py               加权纪律评分
+  scoring.py               纪律评分
   services.py              应用服务层
-  storage.py               本地 JSON 存储
-  violation_catalog.py     违规类型库
+  storage.py               SQLite + JSON 兼容存储
+  violation_catalog.py     违规类型
+  web.py                   本地 Web API
   static/
     index.html
     app.js
     styles.css
-docs/
-  00-development-plan.md
-  01-product-positioning.md
-  02-system-architecture.md
-  03-rule-engine-design.md
-examples/
-  positions.csv
-  trades.csv
-  financial_report_sample.md
-  sample_decision.json
-tests/
 ```
+
+## 当前限制
+
+- QMT 真实连接器尚未完成。
+- DOC / DOCX 文档解析尚未完整实现。
+- AI 在线搜索不是内置浏览器搜索，而是交给配置的 AI Provider 处理。
+- 当前定位是本地单人使用，没有登录、多用户权限和加密存储。
+- 真实交易系统、自动下单、收益预测不在当前范围内。
+
+## 隐私与上传注意
+
+以下内容不应上传到 GitHub：
+
+- `data/`
+- `.venv/`
+- `.env`
+- `*.db`
+- `*.sqlite`
+- 本地备份压缩包
+- 私有白皮书或工程规格文档
+
+本仓库的 `.gitignore` 已默认排除这些内容。
 
 ## 合规边界
 
-DisciplineOS 必须避免被误解为荐股、投资顾问或自动交易系统。
-
-本项目遵守以下原则：
-
-- 不提供确定性收益承诺
-- 不输出“必涨 / 必买 / 目标价”等表述
-- 不主动推荐标的
-- 不替用户交易
-- 不把 Copilot 作为最终裁判
-- 示例仅用于展示系统结构，不构成投资建议
-
-## 当前路线图
-
-已完成：
-
-- Phase 1：MVP 手动闭环、持仓管理、仓位治理
-- Phase 2：纪律卡问答生成器和模板库
-- Phase 3：规则引擎、违规类型库、违规账本生命周期
-- Phase 4：加权纪律评分、复盘归因、规则修订建议
-- Phase 5：CSV / Excel 数据导入
-- Phase 6：本地 Copilot 和财报证据摘要
-
-后续可继续增强：
-
-- 更严格的数据校验和字段映射 UI
-- 更完整的交易流水到持仓自动归集
-- 报告导出
-- 画像问卷
-- 真实 AI API 接入，但必须继续遵守合规边界
+DisciplineOS 的输出只能作为个人纪律检查和复盘参考，不构成投资建议。任何买入、卖出、加仓、减仓决定都应由用户自行负责。
