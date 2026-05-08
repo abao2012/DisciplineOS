@@ -1,0 +1,13 @@
+{
+  "symbol": "SAMPLE",
+  "action": "add",
+  "amount": 10000,
+  "position_before_pct": 10,
+  "position_after_pct": 18,
+  "reason": "Price has fallen a lot and I want to reduce my average cost.",
+  "evidence": [],
+  "emotion": "anxious",
+  "is_before_earnings": false,
+  "thesis_changed": false
+}
+

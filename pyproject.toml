@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "disciplineos"
+version = "0.1.0"
+description = "Local-first personal investment discipline system."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "DisciplineOS Contributors" }]
+keywords = ["investment", "discipline", "audit", "local-first"]
+dependencies = ["openpyxl>=3.1", "pypdf>=4"]
+
+[project.scripts]
+disciplineos = "disciplineos.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+data = ["akshare", "tushare"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+disciplineos = ["static/*.html", "static/*.css", "static/*.js"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

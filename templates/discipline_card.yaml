@@ -1,0 +1,22 @@
+symbol: SAMPLE
+name: Sample Asset
+asset_type: stock
+sector: technology
+thesis:
+  - Clear business quality or trend thesis.
+max_position_pct: 15
+no_buy_conditions:
+  - Valuation is outside the discipline range.
+add_conditions:
+  - New evidence confirms the original thesis.
+  - Position remains below the limit.
+reduce_conditions:
+  - Position exceeds limit.
+  - Thesis weakens materially.
+invalid_conditions:
+  - Core metrics miss expectations for two consecutive periods.
+forbidden_behaviors:
+  - Buy only because price has fallen.
+  - Add before earnings without a plan.
+review_cycle: monthly
+

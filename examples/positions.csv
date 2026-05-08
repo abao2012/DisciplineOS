@@ -1,0 +1,3 @@
+symbol,name,asset_type,market,sector,theme,currency,quantity,cost_price,current_price
+SAMPLE,Sample Asset,stock,HK,technology,AI,HKD,1000,10,10
+ETF1,ETF One,ETF,US,index,core,USD,50,100,104

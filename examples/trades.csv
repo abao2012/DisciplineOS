@@ -1,0 +1,3 @@
+symbol,action,quantity,price,amount,fee,traded_at,note
+SAMPLE,buy,1000,10,10000,5,2026-04-10T10:00:00+00:00,Initial position
+ETF1,buy,50,100,5000,2,2026-04-11T10:00:00+00:00,Allocation buy

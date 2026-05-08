@@ -1,0 +1,739 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DisciplineOS</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>DisciplineOS</h1>
+        <p>Generate, enforce, audit, and review personal investment discipline.</p>
+      </div>
+      <div class="actions">
+        <select id="languageSelect" aria-label="Language">
+          <option value="en">English</option>
+          <option value="zh">中文</option>
+        </select>
+        <input id="monthInput" type="month" />
+        <button id="seedButton" type="button">Load Demo</button>
+        <button id="refreshButton" type="button">Refresh</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel summary">
+        <div>
+          <span class="label">Discipline Score</span>
+          <strong id="score">--</strong>
+        </div>
+        <div>
+          <span class="label">Decision Checks</span>
+          <strong id="decisionCount">--</strong>
+        </div>
+        <div>
+          <span class="label">Monthly Status</span>
+          <strong id="statusCounts">--</strong>
+        </div>
+      </section>
+
+      <section class="grid">
+        <article class="panel layer-rules-panel compact-panel">
+          <div class="section-title">
+            <h2>Settings</h2>
+            <span>Storage and guardrails</span>
+          </div>
+          <form id="settingsForm" class="form">
+            <label>
+              Database Mode
+              <select name="storage_mode">
+                <option value="sqlite">SQLite Local Database</option>
+                <option value="json">JSON Legacy Export</option>
+                <option value="postgres">PostgreSQL Optional</option>
+              </select>
+            </label>
+            <label>
+              Violation Handling
+              <select name="discipline_mode">
+                <option value="block">Block invalid decisions</option>
+                <option value="warn">Warn only</option>
+              </select>
+            </label>
+            <label class="check">
+              <input name="ai_enabled" type="checkbox" />
+              Enable AI review analysis
+            </label>
+            <label data-ai-field>AI API <input name="ai_api_token" autocomplete="off" /></label>
+            <label data-ai-field>AI API URL <input name="ai_api_base_url" /></label>
+            <label data-ai-field>AI Model <input name="ai_model" value="gpt-4.1-mini" /></label>
+            <button class="primary wide" type="submit">Save Settings</button>
+          </form>
+          <form id="backupForm" class="form">
+            <button class="primary wide" type="submit">Create Local Backup</button>
+          </form>
+          <form id="restoreForm" class="form">
+            <label class="wide">
+              Restore From Backup
+              <select name="filename" id="backupSelect"></select>
+            </label>
+            <button class="wide" type="submit">Restore Selected Backup</button>
+          </form>
+          <div class="item-actions">
+            <button type="button" data-action="show-system-status">View System Status</button>
+          </div>
+          <div id="settingsView" class="list hidden"></div>
+          <div id="healthView" class="list hidden"></div>
+          <div id="backupView" class="list hidden"></div>
+        </article>
+
+        <article class="panel layer-info-panel">
+          <div class="section-title">
+            <h2>Data Source Center</h2>
+            <span>Choose one source, then preview and sync.</span>
+          </div>
+          <form id="dataSourceForm" class="form">
+            <label>
+              Data Source
+              <select name="provider_type">
+                <option value="qmt">QMT</option>
+                <option value="tushare">TuShare</option>
+                <option value="akshare">AkShare</option>
+                <option value="csv">CSV</option>
+                <option value="excel">Excel</option>
+                <option value="manual">Manual</option>
+              </select>
+            </label>
+            <div id="dataSourceHint" class="hint wide"></div>
+            <label class="wide" data-source-field="local_path">
+              Local Path
+              <div class="path-input">
+                <input name="local_path" />
+                <button type="button" data-path-picker data-target-form="dataSourceForm" data-target-name="local_path">Browse</button>
+              </div>
+            </label>
+            <label data-source-field="api_token">API Token <input name="api_token" autocomplete="off" /></label>
+            <label data-source-field="api_base_url">API Base URL <input name="api_base_url" /></label>
+            <label class="check"><input name="enabled" type="checkbox" checked /> Enabled</label>
+            <button class="primary wide" type="submit">Save Data Source</button>
+          </form>
+          <form id="dataSyncForm" class="form">
+            <label>
+              Symbol
+              <input name="symbol" list="stockSuggestions" placeholder="300750" />
+            </label>
+            <label>
+              Data Type
+              <select name="capability">
+                <option value="price_daily">Daily K</option>
+                <option value="price_5min">5min K</option>
+                <option value="volume">Volume</option>
+                <option value="financial_metrics">Financial Metrics</option>
+                <option value="positions">Positions</option>
+                <option value="trades">Trades</option>
+              </select>
+            </label>
+            <button class="primary wide" type="submit">Preview Sync</button>
+          </form>
+          <div id="importResult" class="result empty">No sync preview yet.</div>
+          <div class="item-actions">
+            <button type="button" data-action="show-sync-logs">View Data Source Status</button>
+          </div>
+          <div id="dataSourcesView" class="list"></div>
+        </article>
+      </section>
+
+      <section class="grid">
+        <article class="panel layer-rules-panel layer-wide-panel">
+          <div class="section-title">
+            <h2>Discipline Card Generator</h2>
+            <span>Six-question wizard</span>
+          </div>
+          <form id="generatorForm" class="form">
+            <label>
+              Template
+              <select name="template" id="templateSelect"></select>
+            </label>
+            <label>
+              Symbol
+              <input name="symbol" value="SAMPLE" list="stockSuggestions" required />
+              <datalist id="stockSuggestions"></datalist>
+            </label>
+            <label>
+              Name
+              <input name="name" value="Sample Asset" required />
+            </label>
+            <label>
+              Sector / Theme
+              <input name="sector" value="technology" />
+            </label>
+            <label>
+              Max Position %
+              <input name="max_position_pct" type="number" value="15" step="0.1" />
+            </label>
+            <label>
+              Review Cycle
+              <input name="review_cycle" value="monthly" />
+            </label>
+            <label class="wide">
+              1. Why do I buy?
+              <div id="whyBuyOptions" class="option-grid"></div>
+              <textarea name="why_buy" rows="2" placeholder="Custom thesis, one per line"></textarea>
+            </label>
+            <label class="wide">
+              2. How much can I buy at most?
+              <div id="positionPresetOptions" class="option-grid"></div>
+              <textarea name="position_rule" rows="2" placeholder="Custom position discipline"></textarea>
+            </label>
+            <label class="wide">
+              3. At what condition should I not buy?
+              <div id="noBuyOptions" class="option-grid"></div>
+              <textarea name="no_buy" rows="2"></textarea>
+            </label>
+            <label class="wide">
+              4. When can I add?
+              <div id="addWhenOptions" class="option-grid"></div>
+              <textarea name="add_when" rows="2"></textarea>
+            </label>
+            <label class="wide">
+              5. When must I reduce?
+              <div id="reduceWhenOptions" class="option-grid"></div>
+              <textarea name="reduce_when" rows="2"></textarea>
+            </label>
+            <label class="wide">
+              6. When can I raise the position limit?
+              <div id="raisePositionOptions" class="option-grid"></div>
+              <textarea name="raise_position" rows="2"></textarea>
+            </label>
+            <label class="wide">
+              7. When must I lower the position limit?
+              <div id="lowerPositionOptions" class="option-grid"></div>
+              <textarea name="lower_position" rows="2"></textarea>
+            </label>
+            <label class="wide">
+              8. What proves I was wrong?
+              <div id="invalidWhenOptions" class="option-grid"></div>
+              <textarea name="invalid_when" rows="2"></textarea>
+            </label>
+            <label class="wide">
+              Forbidden behaviors
+              <div id="forbiddenOptions" class="option-grid"></div>
+              <textarea name="forbidden_behaviors" rows="2"></textarea>
+            </label>
+            <button class="primary wide" type="submit">Generate And Save Card</button>
+          </form>
+        </article>
+
+        <article class="panel layer-decision-panel">
+          <div class="section-title">
+            <h2>Decision Gate</h2>
+            <span>Pre-trade audit</span>
+          </div>
+          <form id="decisionForm" class="form">
+            <label>
+              Symbol
+              <select id="decisionSymbol" name="symbol"></select>
+              <small class="field-hint">Only symbols with saved discipline cards appear here.</small>
+            </label>
+            <label>
+              Action
+              <select name="action">
+                <option value="buy">Buy</option>
+                <option value="add" selected>Add</option>
+                <option value="reduce">Reduce</option>
+                <option value="sell">Sell</option>
+              </select>
+            </label>
+            <label>
+              Amount
+              <input name="amount" type="number" value="10000" min="0" />
+            </label>
+            <label>
+              Emotion
+              <select name="emotion">
+                <option value="calm">Calm</option>
+                <option value="anxious" selected>Anxious</option>
+                <option value="fearful">Fearful</option>
+                <option value="greedy">Greedy</option>
+                <option value="revenge">Revenge</option>
+                <option value="fomo">FOMO</option>
+              </select>
+            </label>
+            <label class="wide">
+              Reason
+              <textarea name="reason" rows="3">Price has fallen a lot and I want to reduce my average cost.</textarea>
+            </label>
+            <label class="wide">
+              Evidence, one per line
+              <textarea name="evidence" rows="3"></textarea>
+            </label>
+            <label class="wide">
+              Evidence Items
+              <div id="decisionEvidenceOptions" class="option-grid"></div>
+            </label>
+            <label class="check">
+              <input name="is_before_earnings" type="checkbox" />
+              Before earnings
+            </label>
+            <label class="check">
+              <input name="thesis_changed" type="checkbox" />
+              Thesis changed
+            </label>
+            <label class="check wide">
+              <input name="auto_position" type="checkbox" checked />
+              Auto-calculate position before and after action
+            </label>
+            <button class="primary wide" type="submit">Run Audit</button>
+          </form>
+          <div id="auditResult" class="result empty">No audit submitted yet.</div>
+        </article>
+      </section>
+
+      <section class="grid">
+        <article class="panel layer-info-panel">
+          <div class="section-title">
+            <h2>Information Analysis Center</h2>
+            <span>Reports, research, news, and events</span>
+          </div>
+          <form id="financialReportForm" class="form">
+            <label>
+              Material Type
+              <select name="material_type">
+                <option value="financial_report">Financial Report</option>
+                <option value="research_report">Research Report</option>
+                <option value="announcement_news">Announcement / News</option>
+                <option value="market_event">Market Event</option>
+              </select>
+            </label>
+            <label>Symbol <input name="symbol" value="SAMPLE" required /></label>
+            <label>Period <input name="period" value="2026Q1" required /></label>
+            <label class="wide">
+              Local PDF / Document Path
+              <div class="path-input">
+                <input name="path" placeholder="examples\financial_report_sample.md" />
+                <button
+                  type="button"
+                  data-path-picker
+                  data-target-form="financialReportForm"
+                  data-target-name="path"
+                  data-path-mode="file"
+                  data-path-extensions=".pdf,.md,.txt,.doc,.docx"
+                >Browse</button>
+              </div>
+            </label>
+            <label class="check wide">
+              <input name="ai_online_search" type="checkbox" />
+              AI online search
+            </label>
+            <label class="wide">Or Paste Material Text <textarea name="text" rows="5"></textarea></label>
+            <button class="primary wide" type="submit">Analyze Information</button>
+          </form>
+          <div class="item-actions">
+            <button type="button" data-action="show-info-analysis">View Analysis Results</button>
+          </div>
+          <div id="financialReportResult" class="result empty hidden">No report summarized yet.</div>
+        </article>
+        <article class="panel layer-info-panel">
+          <div class="section-title">
+            <h2>Evidence Engine</h2>
+            <span>Manual and extracted evidence</span>
+          </div>
+          <form id="evidenceForm" class="form">
+            <label>
+              Symbol
+              <select id="evidenceSymbol" name="symbol" required></select>
+              <small class="field-hint">Evidence can be manual, extracted by Information Analysis, or synced from data sources.</small>
+            </label>
+            <label>
+              Evidence Type
+              <select name="evidence_type">
+                <option value="user_note">User Note</option>
+                <option value="financial_result">Financial Result</option>
+                <option value="price_condition">Price Condition</option>
+                <option value="volume_signal">Volume Signal</option>
+                <option value="announcement_event">Announcement Event</option>
+              </select>
+            </label>
+            <label class="wide">Title <input name="title" required /></label>
+            <label class="wide">Content <textarea name="content" rows="4" required></textarea></label>
+            <label>Source <input name="source" value="manual" /></label>
+            <label>Source Date <input name="source_date" placeholder="2026-05-01" /></label>
+            <button class="primary wide" type="submit">Save Evidence</button>
+          </form>
+          <div class="item-actions">
+            <button type="button" data-action="show-evidence-library">View Evidence Library</button>
+          </div>
+        </article>
+      </section>
+
+      <section class="grid">
+        <article class="panel hidden">
+          <div class="section-title">
+            <h2>Financial Evidence</h2>
+            <span>Saved summaries</span>
+          </div>
+          <div id="financialReportsView" class="list"></div>
+        </article>
+        <article class="panel layer-risk-panel">
+          <div class="section-title">
+            <h2>Investor Profile</h2>
+            <span>Personal constraints</span>
+          </div>
+          <form id="profileForm" class="form">
+            <label>Name <input name="name" required /></label>
+            <label>Value Style % <input name="style_value" type="number" min="0" max="100" step="0.1" /></label>
+            <label>Growth Style % <input name="style_growth" type="number" min="0" max="100" step="0.1" /></label>
+            <label>Cycle Style % <input name="style_cycle" type="number" min="0" max="100" step="0.1" /></label>
+            <label>Dividend Style % <input name="style_dividend" type="number" min="0" max="100" step="0.1" /></label>
+            <label>Cash / Defensive % <input name="style_cash_defensive" type="number" min="0" max="100" step="0.1" /></label>
+            <div id="styleAllocationHint" class="field-hint wide"></div>
+            <label>Max Single Position % <input name="max_single_position_pct" type="number" step="0.1" /></label>
+            <label>Max Sector Position % <input name="max_sector_position_pct" type="number" step="0.1" /></label>
+            <label>Max Drawdown % <input name="max_drawdown_pct" type="number" step="0.1" /></label>
+            <label class="check"><input name="allow_pre_earnings_add" type="checkbox" /> Allow pre-earnings add</label>
+            <label class="wide">
+              Behavior weaknesses
+              <div class="item-actions compact-actions">
+                <button type="button" data-action="show-behavior-library">Behavior Weakness Library</button>
+              </div>
+              <textarea name="behavioral_weaknesses" rows="4"></textarea>
+            </label>
+            <button class="primary wide" type="submit">Save Profile</button>
+          </form>
+        </article>
+
+        <article class="panel layer-risk-panel">
+          <div class="section-title">
+            <h2>Position Book</h2>
+            <span>Manual holdings</span>
+          </div>
+          <form id="positionForm" class="form">
+            <label>Symbol <input name="symbol" value="SAMPLE" required /></label>
+            <label>Name <input name="name" value="Sample Asset" required /></label>
+            <label>Asset Type <input name="asset_type" value="stock" list="assetTypeOptions" /></label>
+            <label>Market <input name="market" value="HK" list="marketOptions" /></label>
+            <label>Sector <input name="sector" value="technology" list="sectorOptions" /></label>
+            <label>Theme <input name="theme" value="AI" list="themeOptions" /></label>
+            <label>Currency <input name="currency" value="HKD" list="currencyOptions" /></label>
+            <label>Quantity <input name="quantity" type="number" value="1000" step="0.01" /></label>
+            <label>Cost Price <input name="cost_price" type="number" value="10" step="0.01" /></label>
+            <label>Current Price <input name="current_price" type="number" value="10" step="0.01" /></label>
+            <button class="primary wide" type="submit">Save Position</button>
+          </form>
+          <datalist id="assetTypeOptions">
+            <option value="stock">Stock</option>
+            <option value="etf">ETF</option>
+            <option value="fund">Fund</option>
+            <option value="bond">Bond</option>
+            <option value="cash">Cash</option>
+          </datalist>
+          <datalist id="marketOptions">
+            <option value="A">A股</option>
+            <option value="创业板">创业板</option>
+            <option value="科创板">科创板</option>
+            <option value="北交所">北交所</option>
+            <option value="港股">港股</option>
+            <option value="恒生科技">恒科</option>
+            <option value="美股">美股</option>
+            <option value="沪深300">沪深300</option>
+            <option value="中证500">中证500</option>
+            <option value="中证1000">中证1000</option>
+          </datalist>
+          <datalist id="sectorOptions">
+            <option value="新能源">新能源</option>
+            <option value="半导体">半导体</option>
+            <option value="人工智能">人工智能</option>
+            <option value="通信设备">通信设备</option>
+            <option value="医药">医药</option>
+            <option value="消费">消费</option>
+            <option value="白酒">白酒</option>
+            <option value="银行">银行</option>
+            <option value="券商">券商</option>
+            <option value="保险">保险</option>
+            <option value="互联网">互联网</option>
+            <option value="高端制造">高端制造</option>
+            <option value="化工">化工</option>
+            <option value="军工">军工</option>
+          </datalist>
+          <datalist id="themeOptions">
+            <option value="AI">AI</option>
+            <option value="算力">算力</option>
+            <option value="机器人">机器人</option>
+            <option value="新能源汽车">新能源汽车</option>
+            <option value="储能">储能</option>
+            <option value="创新药">创新药</option>
+            <option value="CXO">CXO</option>
+            <option value="国产替代">国产替代</option>
+            <option value="出海">出海</option>
+            <option value="红利">红利</option>
+            <option value="周期复苏">周期复苏</option>
+            <option value="中特估">中特估</option>
+          </datalist>
+          <datalist id="currencyOptions">
+            <option value="CNY">人民币</option>
+            <option value="HKD">港币</option>
+            <option value="USD">美元</option>
+          </datalist>
+        </article>
+      </section>
+
+      <section class="grid">
+        <article class="panel layer-risk-panel compact-panel">
+          <div class="section-title">
+            <h2>Position Guard</h2>
+            <span>Exposure monitor</span>
+          </div>
+          <div class="item-actions">
+            <button type="button" data-action="show-position-guard">View Position Guard</button>
+          </div>
+        </article>
+        <article class="panel layer-review-panel">
+          <div class="section-title">
+            <h2>Monthly Review</h2>
+            <span>Review engine</span>
+          </div>
+          <form id="reviewSnapshotForm" class="form">
+            <button class="primary wide" type="submit">Save Review Snapshot</button>
+          </form>
+          <form id="reviewCompareForm" class="form">
+            <label>
+              Baseline Snapshot
+              <select name="left_snapshot_id"></select>
+            </label>
+            <label>
+              Target Snapshot
+              <select name="right_snapshot_id"></select>
+            </label>
+            <button class="primary wide" type="submit">Compare Snapshots</button>
+          </form>
+          <div class="item-actions">
+            <button type="button" data-action="show-monthly-review">View Monthly Review</button>
+          </div>
+        </article>
+      </section>
+
+      <section class="grid single-panel">
+        <article class="panel layer-audit-panel compact-panel">
+          <div class="section-title">
+            <h2>Trade Ledger</h2>
+            <span>Imported trades</span>
+          </div>
+          <div class="item-actions">
+            <button type="button" data-action="show-trade-ledger">View Trade Ledger</button>
+          </div>
+        </article>
+      </section>
+
+      <section class="panel layer-decision-panel compact-panel">
+        <div class="section-title">
+          <h2>Copilot</h2>
+          <span>Discipline-only assistant</span>
+        </div>
+        <div class="field-hint">
+          Copilot summarizes discipline risks, thesis drift, card draft suggestions, and next review actions. It does not make buy/sell recommendations.
+        </div>
+        <div class="item-actions">
+          <button type="button" data-action="show-copilot">View Copilot</button>
+        </div>
+      </section>
+
+      <section class="panel layer-rules-panel compact-panel">
+        <div class="section-title">
+          <h2>Discipline Card Library</h2>
+          <span>Generated and manual cards</span>
+        </div>
+        <div class="item-actions">
+          <button type="button" data-action="show-card-library">View Discipline Cards</button>
+        </div>
+      </section>
+
+      <section class="panel layer-risk-panel">
+        <div class="section-title">
+          <h2>Positions</h2>
+          <span>Current holdings</span>
+        </div>
+        <div id="positionsView" class="cards"></div>
+      </section>
+
+      <section class="grid">
+        <article class="panel layer-audit-panel compact-panel">
+          <div class="section-title">
+            <h2>Violation Ledger</h2>
+            <span>Audit trail</span>
+          </div>
+          <div class="item-actions">
+            <button type="button" data-action="show-violation-ledger">View Violation Ledger</button>
+          </div>
+        </article>
+        <article class="panel layer-audit-panel compact-panel">
+          <div class="section-title">
+            <h2>Decision History</h2>
+            <span>Recent checks</span>
+          </div>
+          <div class="item-actions">
+            <button type="button" data-action="show-decision-history">View Decision History</button>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <div id="pathBrowser" class="path-browser hidden" role="dialog" aria-modal="true">
+      <div class="path-browser-panel">
+        <div class="section-title">
+          <h2>Path Browser</h2>
+          <button type="button" data-path-action="close">Close</button>
+        </div>
+        <div id="pathBrowserCurrent" class="muted"></div>
+        <div class="item-actions">
+          <button type="button" data-path-action="up">Up</button>
+          <button id="pathBrowserSelect" type="button" data-path-action="select">Select Current Path</button>
+        </div>
+        <div id="pathBrowserList" class="list"></div>
+      </div>
+    </div>
+
+    <div id="systemStatusModal" class="path-browser hidden" role="dialog" aria-modal="true">
+      <div class="path-browser-panel">
+        <div class="section-title">
+          <h2>System Status</h2>
+          <button type="button" data-system-status-action="close">Close</button>
+        </div>
+        <div id="systemStatusView" class="list"></div>
+      </div>
+    </div>
+
+    <div id="syncLogsModal" class="path-browser hidden" role="dialog" aria-modal="true">
+      <div class="path-browser-panel">
+        <div class="section-title">
+          <h2>Data Source Status</h2>
+          <button type="button" data-sync-logs-action="close">Close</button>
+        </div>
+        <div id="syncLogsView" class="list"></div>
+      </div>
+    </div>
+
+    <div id="infoAnalysisModal" class="path-browser hidden" role="dialog" aria-modal="true">
+      <div class="path-browser-panel">
+        <div class="section-title">
+          <h2>Information Analysis Results</h2>
+          <button type="button" data-info-analysis-action="close">Close</button>
+        </div>
+        <div id="infoAnalysisView" class="list"></div>
+      </div>
+    </div>
+
+    <div id="evidenceModal" class="path-browser hidden" role="dialog" aria-modal="true">
+      <div class="path-browser-panel">
+        <div class="section-title">
+          <h2>Evidence Library</h2>
+          <button type="button" data-evidence-action="close">Close</button>
+        </div>
+        <form id="evidenceFilterForm" class="form">
+          <label>
+            Filter Symbol
+            <select id="evidenceFilterSymbol" name="symbol"></select>
+          </label>
+          <label>
+            Filter Type
+            <select name="evidence_type">
+              <option value="">All Types</option>
+              <option value="user_note">User Note</option>
+              <option value="financial_result">Financial Result</option>
+              <option value="price_condition">Price Condition</option>
+              <option value="volume_signal">Volume Signal</option>
+              <option value="announcement_event">Announcement Event</option>
+            </select>
+          </label>
+          <button class="primary wide" type="submit">Filter Evidence</button>
+        </form>
+        <div id="evidenceView" class="list"></div>
+      </div>
+    </div>
+
+    <div id="behaviorLibraryModal" class="path-browser hidden" role="dialog" aria-modal="true">
+      <div class="path-browser-panel wide-modal">
+        <div class="section-title">
+          <h2>Behavior Weakness Library</h2>
+          <button type="button" data-behavior-library-action="close">Close</button>
+        </div>
+        <div id="behaviorLibraryView" class="list"></div>
+      </div>
+    </div>
+
+    <div id="positionGuardModal" class="path-browser hidden" role="dialog" aria-modal="true">
+      <div class="path-browser-panel wide-modal">
+        <div class="section-title">
+          <h2>Position Guard</h2>
+          <button type="button" data-modal-close="positionGuardModal">Close</button>
+        </div>
+        <div id="positionGuardView" class="list"></div>
+      </div>
+    </div>
+
+    <div id="monthlyReviewModal" class="path-browser hidden" role="dialog" aria-modal="true">
+      <div class="path-browser-panel wide-modal">
+        <div class="section-title">
+          <h2>Monthly Review</h2>
+          <button type="button" data-modal-close="monthlyReviewModal">Close</button>
+        </div>
+        <div id="reviewView" class="list"></div>
+        <div id="reviewCompareView" class="list"></div>
+        <div id="reviewSnapshotsView" class="list"></div>
+        <div id="reviewReportsView" class="list"></div>
+      </div>
+    </div>
+
+    <div id="tradeLedgerModal" class="path-browser hidden" role="dialog" aria-modal="true">
+      <div class="path-browser-panel wide-modal">
+        <div class="section-title">
+          <h2>Trade Ledger</h2>
+          <button type="button" data-modal-close="tradeLedgerModal">Close</button>
+        </div>
+        <div id="tradesView" class="list"></div>
+      </div>
+    </div>
+
+    <div id="copilotModal" class="path-browser hidden" role="dialog" aria-modal="true">
+      <div class="path-browser-panel wide-modal">
+        <div class="section-title">
+          <h2>Copilot</h2>
+          <button type="button" data-modal-close="copilotModal">Close</button>
+        </div>
+        <div id="copilotView" class="list"></div>
+      </div>
+    </div>
+
+    <div id="cardLibraryModal" class="path-browser hidden" role="dialog" aria-modal="true">
+      <div class="path-browser-panel wide-modal">
+        <div class="section-title">
+          <h2>Discipline Card Library</h2>
+          <button type="button" data-modal-close="cardLibraryModal">Close</button>
+        </div>
+        <div id="cardsView" class="cards"></div>
+      </div>
+    </div>
+
+    <div id="violationLedgerModal" class="path-browser hidden" role="dialog" aria-modal="true">
+      <div class="path-browser-panel wide-modal">
+        <div class="section-title">
+          <h2>Violation Ledger</h2>
+          <button type="button" data-modal-close="violationLedgerModal">Close</button>
+        </div>
+        <div id="violationsView" class="list"></div>
+      </div>
+    </div>
+
+    <div id="decisionHistoryModal" class="path-browser hidden" role="dialog" aria-modal="true">
+      <div class="path-browser-panel wide-modal">
+        <div class="section-title">
+          <h2>Decision History</h2>
+          <button type="button" data-modal-close="decisionHistoryModal">Close</button>
+        </div>
+        <div id="historyView" class="list"></div>
+      </div>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

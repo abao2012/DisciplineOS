@@ -1,0 +1,10 @@
+name: default
+style: value
+max_single_position_pct: 15
+max_sector_position_pct: 30
+max_drawdown_pct: 20
+allow_pre_earnings_add: false
+behavioral_weaknesses:
+  - emotional_averaging_down
+  - fomo
+
