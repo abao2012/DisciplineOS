@@ -4,6 +4,8 @@ DisciplineOS 是一个本地优先的个人投资纪律系统。它不荐股、�
 
 一句话概括：**DisciplineOS 不回答“这只股票会不会涨”，它回答“这次操作是否符合我事先定义的纪律”。**
 
+![DisciplineOS 中文界面展示](docs/assets/disciplineos-showcase-zh-1440x5000.png)
+
 ## 当前定位
 
 本项目目前是一个可运行的本地 Web 应用和 Python 后端原型，适合用于个人投资纪律管理、交易前自查、证据归档和月度复盘。
