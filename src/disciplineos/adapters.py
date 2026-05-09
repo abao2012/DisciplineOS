@@ -18,6 +18,9 @@ class ImportResult:
     missing_columns: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     items: list[dict[str, Any]] = field(default_factory=list)
+    original_headers: list[str] = field(default_factory=list)
+    normalized_headers: list[str] = field(default_factory=list)
+    field_mapping: dict[str, str] = field(default_factory=dict)
 
 
 REQUIRED_COLUMNS = {
@@ -103,21 +106,43 @@ def import_records(path: str | Path, kind: str) -> ImportResult:
     source = Path(path)
     if not source.exists():
         raise FileNotFoundError(f"Import file not found: {source}")
-    headers, rows = read_tabular_rows(source)
+    headers, rows, metadata = _read_tabular_rows_with_metadata(source)
     if kind == "positions":
-        return _import_positions(source, headers, rows)
-    if kind == "trades":
-        return _import_trades(source, headers, rows)
-    raise ValueError(f"Unsupported import kind: {kind}")
+        result = _import_positions(source, headers, rows)
+    elif kind == "trades":
+        result = _import_trades(source, headers, rows)
+    else:
+        raise ValueError(f"Unsupported import kind: {kind}")
+    result.original_headers = metadata["original_headers"]
+    result.normalized_headers = metadata["normalized_headers"]
+    result.field_mapping = metadata["field_mapping"]
+    return result
 
 
 def read_tabular_rows(path: Path) -> tuple[list[str], list[dict[str, Any]]]:
+    headers, rows, _metadata = _read_tabular_rows_with_metadata(path)
+    return headers, rows
+
+
+def _read_tabular_rows_with_metadata(
+    path: Path,
+) -> tuple[list[str], list[dict[str, Any]], dict[str, Any]]:
+    headers, rows = _read_raw_tabular_rows(path)
+    normalized_headers, normalized_rows, field_mapping = _normalize_table(headers, rows)
+    return normalized_headers, normalized_rows, {
+        "original_headers": headers,
+        "normalized_headers": normalized_headers,
+        "field_mapping": field_mapping,
+    }
+
+
+def _read_raw_tabular_rows(path: Path) -> tuple[list[str], list[dict[str, Any]]]:
     suffix = path.suffix.lower()
     if suffix == ".csv":
         with path.open("r", encoding="utf-8-sig", newline="") as handle:
             reader = csv.DictReader(handle)
             headers = [str(item or "").strip() for item in reader.fieldnames or []]
-            return _normalize_table(headers, [dict(row) for row in reader])
+            return headers, [dict(row) for row in reader]
     if suffix in {".xlsx", ".xlsm"}:
         return _read_excel_rows(path)
     raise ValueError(f"Unsupported import file type: {path.suffix}")
@@ -146,7 +171,7 @@ def _read_excel_rows(path: Path) -> tuple[list[str], list[dict[str, Any]]]:
                 if headers[index]
             }
         )
-    return _normalize_table(headers, records)
+    return headers, records
 
 
 def _import_positions(
@@ -246,10 +271,15 @@ def _missing_columns(headers: list[str], kind: str) -> list[str]:
 def _normalize_table(
     headers: list[str],
     rows: list[dict[str, Any]],
-) -> tuple[list[str], list[dict[str, Any]]]:
+) -> tuple[list[str], list[dict[str, Any]], dict[str, str]]:
     normalized_headers = [_canonical_header(header) for header in headers]
     normalized_rows = [_normalize_row(row) for row in rows]
-    return normalized_headers, normalized_rows
+    field_mapping = {
+        header: normalized
+        for header, normalized in zip(headers, normalized_headers)
+        if header and normalized and header != normalized
+    }
+    return normalized_headers, normalized_rows, field_mapping
 
 
 def _normalize_row(row: dict[str, Any]) -> dict[str, Any]:

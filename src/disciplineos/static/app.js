@@ -322,6 +322,12 @@ const I18N = {
     "No market data saved yet.": "尚未保存行情数据。",
     "Market Records": "行情记录",
     "Position Price Updates": "持仓价格更新",
+    "Field Mapping": "字段映射",
+    "Cash Account": "现金账户",
+    "Cash In": "现金流入",
+    "Cash Out": "现金流出",
+    "Estimated Cash": "估算现金",
+    "Estimated Equity": "估算权益",
     "Data Type": "数据类型",
     "First": "最早",
     "Latest": "最新",
@@ -2207,6 +2213,7 @@ function renderImportResult(result, options = {}) {
   const samples = result.sample_items || [];
   const marketSamples = result.sample_market_records || [];
   const priceUpdate = result.position_price_update || {};
+  const fieldMapping = result.field_mapping || {};
   const canImport = result.can_import && !result.commit;
   const confirmAction = options.capability ? "confirm-sync" : "confirm-import";
   const confirmAttrs = options.capability
@@ -2224,6 +2231,11 @@ function renderImportResult(result, options = {}) {
       }
       <div class="muted">${t("Missing columns")}: ${(result.missing_columns || []).map(escapeHtml).join(", ") || t("None")}</div>
       <div class="muted">${errors.map(escapeHtml).join("<br />") || t("No errors")}</div>
+      ${
+        Object.keys(fieldMapping).length
+          ? `<details class="rule-results"><summary>${t("Field Mapping")}</summary><div class="muted">${Object.entries(fieldMapping).map(([from, to]) => `${escapeHtml(from)} -> ${escapeHtml(localizeText(to))}`).join("<br />")}</div></details>`
+          : ""
+      }
       ${
         samples.length
           ? `<details class="rule-results"><summary>${t("Preview Rows")} (${samples.length})</summary><div class="muted">${samples.map((item) => escapeHtml(JSON.stringify(item))).join("<br />")}</div></details>`
@@ -2594,6 +2606,7 @@ function renderTrades(trades, reconciliation = {}) {
 
 function renderTradeReconciliation(reconciliation = {}) {
   const totals = reconciliation.totals || {};
+  const cash = reconciliation.cash_account || {};
   const warnings = reconciliation.warnings || [];
   return `
     <div class="item">
@@ -2607,6 +2620,13 @@ function renderTradeReconciliation(reconciliation = {}) {
         ${t("Open Positions")} ${totals.open_position_count || 0}
         / ${t("Fees")} ${Number(totals.fees || 0).toFixed(2)}
         / ${t("Trades")} ${totals.trade_count || 0}
+      </div>
+      <div class="muted">
+        ${t("Cash Account")}:
+        ${t("Cash In")} ${Number(cash.cash_in || 0).toFixed(2)}
+        / ${t("Cash Out")} ${Number(cash.cash_out || 0).toFixed(2)}
+        / ${t("Estimated Cash")} ${Number(cash.estimated_cash_balance || 0).toFixed(2)}
+        / ${t("Estimated Equity")} ${Number(cash.estimated_equity || 0).toFixed(2)}
       </div>
       <div class="muted">${warnings.length ? warnings.map(localizeText).map(escapeHtml).join("<br />") : t("No reconciliation warning.")}</div>
     </div>

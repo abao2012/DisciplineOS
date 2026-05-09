@@ -38,6 +38,8 @@ def test_import_positions_csv_accepts_chinese_headers_and_number_formats(tmp_pat
     assert result.items[0]["quantity"] == 1000
     assert result.items[0]["current_price"] == 210.75
     assert result.items[0]["sector"] == "新能源"
+    assert result.field_mapping["股票代码"] == "symbol"
+    assert result.normalized_headers[:3] == ["symbol", "name", "quantity"]
 
 
 def test_import_trades_excel(tmp_path: Path) -> None:
@@ -69,6 +71,7 @@ def test_import_trades_excel_accepts_chinese_headers_and_actions(tmp_path: Path)
     assert result.items[0]["action"] == "buy"
     assert result.items[0]["amount"] == 21050
     assert result.items[0]["fee"] == 1.5
+    assert result.field_mapping["操作"] == "action"
 
 
 def test_service_import_file_persists_positions(tmp_path: Path) -> None:

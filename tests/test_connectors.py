@@ -134,6 +134,44 @@ def test_service_upserts_market_records_when_sync_repeats(tmp_path: Path) -> Non
     assert market_records[0]["fields"]["close"] == 13.5
 
 
+def test_service_sync_state_and_evidence_are_idempotent(tmp_path: Path) -> None:
+    csv_path = tmp_path / "prices.csv"
+    csv_path.write_text(
+        "symbol,date,close\n"
+        "AAA,2026-05-01,12.5\n",
+        encoding="utf-8",
+    )
+    service = DisciplineService(tmp_path / "data")
+    service.save_data_source(
+        {
+            "provider_name": "local_prices",
+            "provider_type": "csv",
+            "enabled": True,
+            "priority": 10,
+            "config": {"local_path": str(csv_path)},
+        }
+    )
+    service.save_capability(
+        {
+            "capability": "price_daily",
+            "provider_name": "local_prices",
+            "fallback_provider": "",
+            "priority": 10,
+        }
+    )
+
+    first = service.sync_capability({"capability": "price_daily", "confirm": True})
+    second = service.sync_capability({"capability": "price_daily", "confirm": True})
+
+    evidence = service.list_evidence(symbol="AAA", evidence_type="price_condition")
+    sync_state = service.list_data_sync_state()[0]
+    assert first["sync_state"]["last_source_timestamp"] == "2026-05-01"
+    assert second["sync_state"]["row_count"] == 1
+    assert len(evidence) == 1
+    assert sync_state["provider_name"] == "local_prices"
+    assert sync_state["capability"] == "price_daily"
+
+
 def test_price_sync_updates_existing_position_current_price(tmp_path: Path) -> None:
     csv_path = tmp_path / "prices.csv"
     csv_path.write_text(

@@ -97,12 +97,26 @@ def reconcile_trades(
     positions = _ledgers_to_positions(ledgers, position_metadata or {})
     totals = {
         "cash_flow": round(cash_flow, 2),
+        "cash_in": round(sum(item.sell_amount for item in ledgers.values()), 2),
+        "cash_out": round(sum(item.buy_amount for item in ledgers.values()), 2),
         "realized_pnl": round(sum(item.realized_pnl for item in ledgers.values()), 2),
         "unrealized_pnl": round(sum(item.unrealized_pnl for item in ledgers.values()), 2),
         "fees": round(sum(item.fees for item in ledgers.values()), 2),
         "market_value": round(sum(item.market_value for item in ledgers.values()), 2),
         "open_position_count": len(positions),
         "trade_count": len(parsed_trades),
+    }
+    cash_account = {
+        "starting_cash": 0.0,
+        "cash_in": totals["cash_in"],
+        "cash_out": totals["cash_out"],
+        "fees": totals["fees"],
+        "net_cash_flow": totals["cash_flow"],
+        "estimated_cash_balance": totals["cash_flow"],
+        "market_value": totals["market_value"],
+        "estimated_equity": round(totals["cash_flow"] + totals["market_value"], 2),
+        "realized_pnl": totals["realized_pnl"],
+        "unrealized_pnl": totals["unrealized_pnl"],
     }
     return {
         "positions": positions,
@@ -111,6 +125,7 @@ def reconcile_trades(
             for symbol, ledger in sorted(ledgers.items())
         },
         "totals": totals,
+        "cash_account": cash_account,
         "warnings": warnings,
     }
 

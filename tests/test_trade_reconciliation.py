@@ -43,6 +43,10 @@ def test_reconcile_trades_uses_moving_average_cost() -> None:
     assert position["cost_price"] == 15.01
     assert position["current_price"] == 25
     assert result["totals"]["cash_flow"] == -1753
+    assert result["cash_account"]["cash_in"] == 1249
+    assert result["cash_account"]["cash_out"] == 3002
+    assert result["cash_account"]["estimated_cash_balance"] == -1753
+    assert result["cash_account"]["estimated_equity"] == 1997
 
 
 def test_reconcile_trades_warns_when_sell_exceeds_position() -> None:

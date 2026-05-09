@@ -60,6 +60,12 @@ class DisciplineRepository:
     def list_data_sync_logs(self, limit: int = 20) -> list[dict[str, Any]]:
         return self.store.list_data_sync_logs(limit=limit)
 
+    def save_data_sync_state(self, item: dict[str, Any]) -> dict[str, Any]:
+        return self.store.save_data_sync_state(item)
+
+    def list_data_sync_state(self) -> list[dict[str, Any]]:
+        return self.store.list_data_sync_state()
+
     def save_market_records(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return self.store.save_market_records(records)
 

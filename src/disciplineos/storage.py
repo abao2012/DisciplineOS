@@ -286,6 +286,60 @@ class SQLiteStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def save_data_sync_state(self, item: dict[str, Any]) -> dict[str, Any]:
+        state = {
+            "provider_name": str(item["provider_name"]),
+            "capability": str(item["capability"]),
+            "symbol": str(item.get("symbol", "")).strip().upper(),
+            "status": str(item["status"]),
+            "row_count": int(item.get("row_count", 0)),
+            "last_success_at": str(item.get("last_success_at", "")),
+            "last_error": str(item.get("last_error", "")),
+            "last_source_timestamp": str(item.get("last_source_timestamp", "")),
+            "updated_at": _utc_now(),
+        }
+        with self._connect() as conn:
+            conn.execute(
+                """
+                insert into data_sync_state(
+                    provider_name, capability, symbol, status, row_count,
+                    last_success_at, last_error, last_source_timestamp, updated_at
+                )
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                on conflict(provider_name, capability, symbol) do update set
+                    status = excluded.status,
+                    row_count = excluded.row_count,
+                    last_success_at = excluded.last_success_at,
+                    last_error = excluded.last_error,
+                    last_source_timestamp = excluded.last_source_timestamp,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    state["provider_name"],
+                    state["capability"],
+                    state["symbol"],
+                    state["status"],
+                    state["row_count"],
+                    state["last_success_at"] or None,
+                    state["last_error"],
+                    state["last_source_timestamp"],
+                    state["updated_at"],
+                ),
+            )
+        return state
+
+    def list_data_sync_state(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                select provider_name, capability, symbol, status, row_count,
+                       last_success_at, last_error, last_source_timestamp, updated_at
+                from data_sync_state
+                order by updated_at desc, provider_name, capability, symbol
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def save_market_records(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         saved: list[dict[str, Any]] = []
         now = _utc_now()
@@ -424,6 +478,18 @@ class SQLiteStore:
                     message text not null default '',
                     started_at text not null,
                     finished_at text
+                );
+                create table if not exists data_sync_state (
+                    provider_name text not null,
+                    capability text not null,
+                    symbol text not null default '',
+                    status text not null,
+                    row_count integer not null default 0,
+                    last_success_at text,
+                    last_error text not null default '',
+                    last_source_timestamp text not null default '',
+                    updated_at text not null,
+                    primary key (provider_name, capability, symbol)
                 );
                 create table if not exists market_data (
                     id text primary key,

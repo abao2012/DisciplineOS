@@ -6,6 +6,7 @@ import tempfile
 import zipfile
 from collections import Counter
 from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
 
@@ -108,6 +109,9 @@ class DisciplineService:
 
     def list_data_sync_logs(self, limit: int = 20) -> list[dict]:
         return self.repository.list_data_sync_logs(limit=limit)
+
+    def list_data_sync_state(self) -> list[dict]:
+        return self.repository.list_data_sync_state()
 
     def list_market_records(
         self,
@@ -264,6 +268,20 @@ class DisciplineService:
                 "finished_at": finished_at,
             }
         )
+        sync_state = None
+        if confirm:
+            sync_state = self.repository.save_data_sync_state(
+                {
+                    "provider_name": source["provider_name"],
+                    "capability": capability,
+                    "symbol": symbol_filter,
+                    "status": status,
+                    "row_count": result.get("imported", 0),
+                    "last_success_at": finished_at if status != "error" else "",
+                    "last_error": message if status == "error" else "",
+                    "last_source_timestamp": _last_source_timestamp(result),
+                }
+            )
         return {
             "ok": status != "error",
             "capability": capability,
@@ -271,6 +289,7 @@ class DisciplineService:
             "mapping": mapping,
             "result": result,
             "sync_log": log,
+            "sync_state": sync_state,
         }
 
     def list_evidence(
@@ -292,17 +311,20 @@ class DisciplineService:
         return self.repository.save_evidence(to_dict(evidence))
 
     def save_evidence_dict(self, payload: dict) -> dict:
-        evidence = evidence_from_dict(
-            {
-                "symbol": str(payload.get("symbol", "")).upper(),
-                "evidence_type": str(payload.get("evidence_type", "user_note")),
-                "title": str(payload.get("title", "")),
-                "content": str(payload.get("content", "")),
-                "source": str(payload.get("source", "manual")),
-                "source_date": str(payload.get("source_date", "")),
-                "linked_decision_id": str(payload.get("linked_decision_id", "")),
-            }
-        )
+        evidence_payload = {
+            "symbol": str(payload.get("symbol", "")).upper(),
+            "evidence_type": str(payload.get("evidence_type", "user_note")),
+            "title": str(payload.get("title", "")),
+            "content": str(payload.get("content", "")),
+            "source": str(payload.get("source", "manual")),
+            "source_date": str(payload.get("source_date", "")),
+            "linked_decision_id": str(payload.get("linked_decision_id", "")),
+        }
+        if payload.get("id"):
+            evidence_payload["id"] = str(payload["id"])
+        if payload.get("created_at"):
+            evidence_payload["created_at"] = str(payload["created_at"])
+        evidence = evidence_from_dict(evidence_payload)
         return self.save_evidence(evidence)
 
     def list_ai_runs(self, limit: int = 20) -> list[dict]:
@@ -691,6 +713,7 @@ class DisciplineService:
             )
             saved_items = []
             for item in result.items:
+                item.setdefault("id", _stable_evidence_id(item, capability))
                 saved_items.append(self.save_evidence_dict(item))
             payload["items"] = saved_items
             payload["market_records"] = saved_market_records
@@ -826,6 +849,7 @@ class DisciplineService:
             "data_sources": self.list_data_sources(),
             "data_capabilities": self.list_capabilities(),
             "data_sync_logs": self.list_data_sync_logs(limit=10),
+            "data_sync_state": self.list_data_sync_state(),
             "market_data_summary": self.market_data_summary(),
             "card_templates": self.list_card_templates(),
             "rule_specs": list_rule_specs(),
@@ -1663,3 +1687,31 @@ def _market_close(record: dict) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _stable_evidence_id(item: dict, capability: str) -> str:
+    raw = "|".join(
+        [
+            str(item.get("source", "")),
+            str(capability),
+            str(item.get("symbol", "")).upper(),
+            str(item.get("evidence_type", "")),
+            str(item.get("title", "")),
+            str(item.get("source_date", "")),
+            str(item.get("content", "")),
+        ]
+    )
+    return f"ev-{sha256(raw.encode('utf-8')).hexdigest()[:32]}"
+
+
+def _last_source_timestamp(result: dict) -> str:
+    timestamps: list[str] = []
+    for item in result.get("market_records", []) or []:
+        timestamp = str(item.get("timestamp", "")).strip()
+        if timestamp:
+            timestamps.append(timestamp)
+    for item in result.get("items", []) or []:
+        timestamp = str(item.get("source_date", "")).strip()
+        if timestamp:
+            timestamps.append(timestamp)
+    return max(timestamps) if timestamps else ""
