@@ -28,6 +28,28 @@ def test_csv_connector_previews_price_daily_as_evidence(tmp_path: Path) -> None:
     assert result.market_records[0]["fields"]["close"] == 12.5
 
 
+def test_csv_connector_accepts_chinese_market_headers(tmp_path: Path) -> None:
+    csv_path = tmp_path / "prices_cn.csv"
+    csv_path.write_text(
+        "股票代码,日期,收盘价,涨跌幅,成交量\n"
+        "300750,2026-05-01,210.5,2.1%,\"10,000\"\n",
+        encoding="utf-8",
+    )
+    source = {
+        "provider_name": "local_prices",
+        "provider_type": "csv",
+        "config": {"local_path": str(csv_path)},
+    }
+
+    result = build_connector(source).preview("price_daily")
+
+    assert result.imported == 1
+    assert result.items[0]["symbol"] == "300750"
+    assert "change_pct=2.1" in result.items[0]["content"]
+    assert result.market_records[0]["fields"]["close"] == 210.5
+    assert result.market_records[0]["fields"]["volume"] == 10000.0
+
+
 def test_service_syncs_price_daily_to_evidence_after_confirm(tmp_path: Path) -> None:
     csv_path = tmp_path / "prices.csv"
     csv_path.write_text(

@@ -22,6 +22,24 @@ def test_import_positions_csv(tmp_path: Path) -> None:
     assert result.items[0]["current_price"] == 6
 
 
+def test_import_positions_csv_accepts_chinese_headers_and_number_formats(tmp_path: Path) -> None:
+    csv_path = tmp_path / "positions_cn.csv"
+    csv_path.write_text(
+        "股票代码,股票名称,持仓数量,成本价,当前价,行业\n"
+        "300750,宁德时代,\"1,000\",200.5,210.75,新能源\n",
+        encoding="utf-8",
+    )
+
+    result = import_records(csv_path, "positions")
+
+    assert result.imported == 1
+    assert result.items[0]["symbol"] == "300750"
+    assert result.items[0]["name"] == "宁德时代"
+    assert result.items[0]["quantity"] == 1000
+    assert result.items[0]["current_price"] == 210.75
+    assert result.items[0]["sector"] == "新能源"
+
+
 def test_import_trades_excel(tmp_path: Path) -> None:
     xlsx_path = tmp_path / "trades.xlsx"
     workbook = Workbook()
@@ -34,6 +52,23 @@ def test_import_trades_excel(tmp_path: Path) -> None:
 
     assert result.imported == 1
     assert result.items[0]["amount"] == 50
+
+
+def test_import_trades_excel_accepts_chinese_headers_and_actions(tmp_path: Path) -> None:
+    xlsx_path = tmp_path / "trades_cn.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["证券代码", "操作", "数量", "成交价", "手续费", "成交时间"])
+    sheet.append(["300750", "买入", "100", "210.5", "1.5", "2026-05-01 10:00"])
+    workbook.save(xlsx_path)
+
+    result = import_records(xlsx_path, "trades")
+
+    assert result.imported == 1
+    assert result.items[0]["symbol"] == "300750"
+    assert result.items[0]["action"] == "buy"
+    assert result.items[0]["amount"] == 21050
+    assert result.items[0]["fee"] == 1.5
 
 
 def test_service_import_file_persists_positions(tmp_path: Path) -> None:

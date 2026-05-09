@@ -418,10 +418,22 @@ examples/
 symbol,name,asset_type,market,sector,theme,currency,quantity,cost_price,current_price
 ```
 
+常见中文表头也可以识别，例如：
+
+```csv
+股票代码,股票名称,资产类型,市场,行业,主题,币种,持仓数量,成本价,当前价
+```
+
 交易流水 CSV 字段：
 
 ```csv
 symbol,action,quantity,price,amount,fee,traded_at,note
+```
+
+常见中文表头也可以识别，例如：
+
+```csv
+证券代码,操作,数量,成交价,成交金额,手续费,成交时间,备注
 ```
 
 `action` 支持：
@@ -430,6 +442,13 @@ symbol,action,quantity,price,amount,fee,traded_at,note
 - `add`
 - `reduce`
 - `sell`
+- `买入`
+- `加仓`
+- `减仓`
+- `卖出`
+- `清仓`
+
+行情 / 财务 CSV 字段也支持常见别名，例如 `股票代码`、`日期`、`交易时间`、`收盘价`、`涨跌幅`、`成交量`、`报告期`、`指标`、`数值`。数字字段支持简单清洗，例如 `10,000` 和 `2.1%`。
 
 ## 项目结构
 

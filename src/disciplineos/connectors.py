@@ -486,7 +486,7 @@ def _number(row: dict[str, Any], key: str) -> float:
     value = row.get(key, 0)
     if value in (None, ""):
         return 0.0
-    return float(value)
+    return float(_clean_number_text(value))
 
 
 def _optional_text(row: dict[str, Any], key: str) -> str:
@@ -762,7 +762,7 @@ def _number_any(row: dict[str, Any], key: str) -> float:
     value = row.get(key, 0)
     if value in (None, ""):
         return 0.0
-    return float(value)
+    return float(_clean_number_text(value))
 
 
 def _optional_number_any(row: dict[str, Any], key: str) -> float | None:
@@ -776,7 +776,7 @@ def _number_or_text(value: Any) -> float | str:
     if not text:
         return ""
     try:
-        return float(text)
+        return float(_clean_number_text(text))
     except ValueError:
         return text
 
@@ -811,3 +811,10 @@ def _market_record(
         "metric": str(metric or "").strip(),
         "fields": {key: value for key, value in fields.items() if value not in (None, "")},
     }
+
+
+def _clean_number_text(value: Any) -> str:
+    text = str(value).strip().replace(",", "")
+    if text.endswith("%"):
+        text = text[:-1]
+    return text
