@@ -21,6 +21,7 @@ class ConnectorResult:
     missing_columns: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     items: list[dict[str, Any]] = field(default_factory=list)
+    market_records: list[dict[str, Any]] = field(default_factory=list)
 
 
 class ProviderConnector(Protocol):
@@ -319,6 +320,15 @@ def _preview_market_evidence(
         try:
             item = _row_to_evidence(row, capability, provider_name)
             result.items.append(item)
+            result.market_records.append(
+                _row_to_market_record(
+                    row=row,
+                    capability=capability,
+                    provider_name=provider_name,
+                    provider_type=provider_type,
+                    source=str(source),
+                )
+            )
             result.imported += 1
         except Exception as exc:
             result.skipped += 1
@@ -398,6 +408,73 @@ def _row_to_evidence(
     raise ValueError(f"Unsupported connector capability: {capability}")
 
 
+def _row_to_market_record(
+    *,
+    row: dict[str, Any],
+    capability: str,
+    provider_name: str,
+    provider_type: str,
+    source: str,
+) -> dict[str, Any]:
+    symbol = _text(row, "symbol").upper()
+    if not symbol:
+        raise ValueError("symbol is required")
+    if capability == "price_daily":
+        date = _text(row, "date")
+        return _market_record(
+            provider_name=provider_name,
+            provider_type=provider_type,
+            source=source,
+            data_type=capability,
+            symbol=symbol,
+            timestamp=date,
+            fields={
+                "close": _number(row, "close"),
+                "change_pct": _optional_text(row, "change_pct"),
+                "volume": _optional_number(row, "volume"),
+            },
+        )
+    if capability == "price_5min":
+        timestamp = _text(row, "datetime")
+        return _market_record(
+            provider_name=provider_name,
+            provider_type=provider_type,
+            source=source,
+            data_type=capability,
+            symbol=symbol,
+            timestamp=timestamp,
+            fields={
+                "close": _number(row, "close"),
+                "volume": _optional_number(row, "volume"),
+            },
+        )
+    if capability == "volume":
+        date = _text(row, "date")
+        return _market_record(
+            provider_name=provider_name,
+            provider_type=provider_type,
+            source=source,
+            data_type=capability,
+            symbol=symbol,
+            timestamp=date,
+            fields={"volume": _number(row, "volume")},
+        )
+    if capability == "financial_metrics":
+        period = _text(row, "period")
+        metric = _text(row, "metric")
+        return _market_record(
+            provider_name=provider_name,
+            provider_type=provider_type,
+            source=source,
+            data_type=capability,
+            symbol=symbol,
+            timestamp=period,
+            metric=metric,
+            fields={"metric": metric, "value": _text(row, "value")},
+        )
+    raise ValueError(f"Unsupported connector capability: {capability}")
+
+
 def _text(row: dict[str, Any], key: str, default: str = "") -> str:
     value = row.get(key, default)
     if value is None:
@@ -410,6 +487,16 @@ def _number(row: dict[str, Any], key: str) -> float:
     if value in (None, ""):
         return 0.0
     return float(value)
+
+
+def _optional_text(row: dict[str, Any], key: str) -> str:
+    return _text(row, key) if key in row and row.get(key) not in (None, "") else ""
+
+
+def _optional_number(row: dict[str, Any], key: str) -> float | None:
+    if key not in row or row.get(key) in (None, ""):
+        return None
+    return _number(row, key)
 
 
 def _connector_error(
@@ -472,6 +559,7 @@ def _market_records_to_result(
                 date = _text_any(row, date_key)
                 close = _number_any(row, close_key)
                 change_pct = _text_any(row, change_key) if change_key else ""
+                volume = _optional_number_any(row, volume_key)
                 result.items.append(
                     {
                         "symbol": row_symbol,
@@ -482,6 +570,21 @@ def _market_records_to_result(
                         "source": provider_name,
                         "source_date": _source_date(date),
                     }
+                )
+                result.market_records.append(
+                    _market_record(
+                        provider_name=provider_name,
+                        provider_type=provider_type,
+                        source=source,
+                        data_type=capability,
+                        symbol=row_symbol,
+                        timestamp=_source_date(date),
+                        fields={
+                            "close": close,
+                            "change_pct": change_pct,
+                            "volume": volume,
+                        },
+                    )
                 )
             elif capability == "price_5min":
                 timestamp = _text_any(row, date_key)
@@ -498,6 +601,20 @@ def _market_records_to_result(
                         "source_date": _source_date(timestamp),
                     }
                 )
+                result.market_records.append(
+                    _market_record(
+                        provider_name=provider_name,
+                        provider_type=provider_type,
+                        source=source,
+                        data_type=capability,
+                        symbol=row_symbol,
+                        timestamp=timestamp,
+                        fields={
+                            "close": close,
+                            "volume": _number_or_text(volume),
+                        },
+                    )
+                )
             elif capability == "volume":
                 date = _text_any(row, date_key)
                 volume = _number_any(row, volume_key)
@@ -510,6 +627,17 @@ def _market_records_to_result(
                         "source": provider_name,
                         "source_date": _source_date(date),
                     }
+                )
+                result.market_records.append(
+                    _market_record(
+                        provider_name=provider_name,
+                        provider_type=provider_type,
+                        source=source,
+                        data_type=capability,
+                        symbol=row_symbol,
+                        timestamp=_source_date(date),
+                        fields={"volume": volume},
+                    )
                 )
         except Exception as exc:
             result.skipped += 1
@@ -552,6 +680,18 @@ def _financial_records_to_result(
                 "source": provider_name,
                 "source_date": _source_date(period),
             }
+        )
+        result.market_records.append(
+            _market_record(
+                provider_name=provider_name,
+                provider_type=provider_type,
+                source=source,
+                data_type="financial_metrics",
+                symbol=symbol,
+                timestamp=_source_date(period),
+                metric=str(key),
+                fields={"metric": str(key), "value": value},
+            )
         )
     result.imported = len(result.items)
     if not result.items:
@@ -625,6 +765,22 @@ def _number_any(row: dict[str, Any], key: str) -> float:
     return float(value)
 
 
+def _optional_number_any(row: dict[str, Any], key: str) -> float | None:
+    if not key or key not in row or row.get(key) in (None, ""):
+        return None
+    return _number_any(row, key)
+
+
+def _number_or_text(value: Any) -> float | str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        return float(text)
+    except ValueError:
+        return text
+
+
 def _source_date(value: str) -> str:
     text = str(value or "").strip()
     if len(text) >= 10 and text[4] == "-" and text[7] == "-":
@@ -632,3 +788,26 @@ def _source_date(value: str) -> str:
     if len(text) >= 8 and text[:8].isdigit():
         return f"{text[:4]}-{text[4:6]}-{text[6:8]}"
     return text[:10]
+
+
+def _market_record(
+    *,
+    provider_name: str,
+    provider_type: str,
+    source: str,
+    data_type: str,
+    symbol: str,
+    timestamp: str,
+    fields: dict[str, Any],
+    metric: str = "",
+) -> dict[str, Any]:
+    return {
+        "provider_name": provider_name,
+        "provider_type": provider_type,
+        "source": source,
+        "data_type": data_type,
+        "symbol": str(symbol or "").strip().upper(),
+        "timestamp": str(timestamp or "").strip(),
+        "metric": str(metric or "").strip(),
+        "fields": {key: value for key, value in fields.items() if value not in (None, "")},
+    }

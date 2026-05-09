@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import importlib.util
 import sqlite3
+from hashlib import sha256
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -285,6 +286,98 @@ class SQLiteStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def save_market_records(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        saved: list[dict[str, Any]] = []
+        now = _utc_now()
+        with self._connect() as conn:
+            for item in records:
+                record = _normalize_market_record(item, now)
+                conn.execute(
+                    """
+                    insert into market_data(
+                        id, provider_name, provider_type, data_type, symbol,
+                        timestamp, metric, fields_json, source, created_at, updated_at
+                    )
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    on conflict(id) do update set
+                        provider_type = excluded.provider_type,
+                        fields_json = excluded.fields_json,
+                        source = excluded.source,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        record["id"],
+                        record["provider_name"],
+                        record["provider_type"],
+                        record["data_type"],
+                        record["symbol"],
+                        record["timestamp"],
+                        record["metric"],
+                        json.dumps(record["fields"], ensure_ascii=False),
+                        record["source"],
+                        record["created_at"],
+                        record["updated_at"],
+                    ),
+                )
+                saved.append(record)
+        return saved
+
+    def list_market_records(
+        self,
+        symbol: str | None = None,
+        data_type: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        params: list[Any] = []
+        clauses: list[str] = []
+        if symbol:
+            clauses.append("symbol = ?")
+            params.append(symbol.strip().upper())
+        if data_type:
+            clauses.append("data_type = ?")
+            params.append(data_type.strip())
+        where = f"where {' and '.join(clauses)}" if clauses else ""
+        sql = f"""
+            select id, provider_name, provider_type, data_type, symbol,
+                   timestamp, metric, fields_json, source, created_at, updated_at
+            from market_data
+            {where}
+            order by timestamp desc, updated_at desc
+            limit ?
+        """
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [_market_row_to_dict(row) for row in rows]
+
+    def market_data_summary(self) -> dict[str, Any]:
+        with self._connect() as conn:
+            by_type = conn.execute(
+                """
+                select data_type, count(*) as row_count,
+                       min(timestamp) as first_timestamp,
+                       max(timestamp) as last_timestamp
+                from market_data
+                group by data_type
+                order by data_type
+                """
+            ).fetchall()
+            by_symbol = conn.execute(
+                """
+                select symbol, count(*) as row_count,
+                       min(timestamp) as first_timestamp,
+                       max(timestamp) as last_timestamp
+                from market_data
+                group by symbol
+                order by row_count desc, symbol
+                limit 20
+                """
+            ).fetchall()
+        return {
+            "by_type": [dict(row) for row in by_type],
+            "top_symbols": [dict(row) for row in by_symbol],
+        }
+
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
@@ -332,6 +425,23 @@ class SQLiteStore:
                     started_at text not null,
                     finished_at text
                 );
+                create table if not exists market_data (
+                    id text primary key,
+                    provider_name text not null,
+                    provider_type text not null,
+                    data_type text not null,
+                    symbol text not null,
+                    timestamp text not null,
+                    metric text not null default '',
+                    fields_json text not null default '{}',
+                    source text not null default '',
+                    created_at text not null,
+                    updated_at text not null
+                );
+                create index if not exists idx_market_data_symbol_type_time
+                    on market_data(symbol, data_type, timestamp);
+                create index if not exists idx_market_data_type_time
+                    on market_data(data_type, timestamp);
                 create table if not exists evidence_items (
                     id text primary key,
                     symbol text not null,
@@ -841,3 +951,46 @@ def _test_local_file(
         "status": "ok",
         "message": f"{label} provider is ready: {path}",
     }
+
+
+def _normalize_market_record(item: dict[str, Any], now: str) -> dict[str, Any]:
+    provider_name = str(item.get("provider_name", "")).strip() or "unknown"
+    data_type = str(item.get("data_type", "")).strip()
+    symbol = str(item.get("symbol", "")).strip().upper()
+    timestamp = str(item.get("timestamp", "")).strip()
+    metric = str(item.get("metric", "")).strip()
+    if not data_type or not symbol or not timestamp:
+        raise ValueError("market record requires data_type, symbol, and timestamp")
+    fields = item.get("fields", {})
+    if not isinstance(fields, dict):
+        fields = {"value": fields}
+    return {
+        "id": _market_record_id(provider_name, data_type, symbol, timestamp, metric),
+        "provider_name": provider_name,
+        "provider_type": str(item.get("provider_type", "")).strip(),
+        "data_type": data_type,
+        "symbol": symbol,
+        "timestamp": timestamp,
+        "metric": metric,
+        "fields": fields,
+        "source": str(item.get("source", "")).strip(),
+        "created_at": str(item.get("created_at") or now),
+        "updated_at": now,
+    }
+
+
+def _market_record_id(
+    provider_name: str,
+    data_type: str,
+    symbol: str,
+    timestamp: str,
+    metric: str,
+) -> str:
+    raw = "|".join([provider_name, data_type, symbol, timestamp, metric])
+    return sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
+def _market_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    item = dict(row)
+    item["fields"] = json.loads(item.pop("fields_json") or "{}")
+    return item

@@ -18,6 +18,9 @@ const state = {
     financialReports: [],
     infoAnalysisSummary: null,
     syncLogs: [],
+    marketDataSummary: { by_type: [], top_symbols: [] },
+    marketRecords: [],
+    tradeReconciliation: { totals: {}, warnings: [], by_symbol: {} },
     evidenceItems: [],
     cards: {},
   },
@@ -92,6 +95,8 @@ const els = {
   systemStatusView: document.querySelector("#systemStatusView"),
   syncLogsModal: document.querySelector("#syncLogsModal"),
   syncLogsView: document.querySelector("#syncLogsView"),
+  marketDataModal: document.querySelector("#marketDataModal"),
+  marketDataView: document.querySelector("#marketDataView"),
   infoAnalysisModal: document.querySelector("#infoAnalysisModal"),
   infoAnalysisView: document.querySelector("#infoAnalysisView"),
   evidenceModal: document.querySelector("#evidenceModal"),
@@ -310,6 +315,17 @@ const I18N = {
     "Health Checks": "健康检查",
     "Data Source Center": "数据源中心",
     "Provider and capability mapping": "Provider 与能力映射",
+    "View Market Data": "查看行情数据",
+    "Market Data": "行情数据",
+    "Market Data Summary": "行情数据汇总",
+    "Recent Market Records": "最近行情记录",
+    "No market data saved yet.": "尚未保存行情数据。",
+    "Market Records": "行情记录",
+    "Position Price Updates": "持仓价格更新",
+    "Data Type": "数据类型",
+    "First": "最早",
+    "Latest": "最新",
+    "Top Symbols": "主要标的",
     "Provider": "Provider",
     "Manual": "手动",
     "Provider Name": "Provider 名称",
@@ -374,6 +390,13 @@ const I18N = {
     "No import yet.": "尚未导入。",
     "Trade Ledger": "交易流水",
     "Imported trades": "已导入交易",
+    "Trade Reconciliation": "交易归集",
+    "Cash Flow": "现金流",
+    "Realized PnL": "已实现盈亏",
+    "Unrealized PnL": "未实现盈亏",
+    "Open Positions": "开放持仓",
+    "Fees": "费用",
+    "No reconciliation warning.": "暂无归集警告。",
     "Financial Report Agent": "财报摘要助手",
     "Evidence summary only": "仅生成证据摘要",
     "Period": "周期",
@@ -1620,6 +1643,9 @@ document.addEventListener("click", async (event) => {
   if (button.dataset.action === "show-sync-logs") {
     showSyncLogs();
   }
+  if (button.dataset.action === "show-market-data") {
+    await showMarketData();
+  }
   if (button.dataset.action === "show-info-analysis") {
     showInfoAnalysis();
   }
@@ -1820,13 +1846,14 @@ function renderDashboard(data) {
   renderDataSources(
     data.data_sources || [],
     data.data_capabilities || [],
-    data.data_sync_logs || []
+    data.data_sync_logs || [],
+    data.market_data_summary || { by_type: [], top_symbols: [] }
   );
   renderTemplates(data.card_templates || {});
   renderProfile(data.profile || {});
   renderCards(data.cards || {});
   renderPositions(data.positions || {});
-  renderTrades(data.trades || []);
+  renderTrades(data.trades || [], data.trade_reconciliation || {});
   renderFinancialReports(data.financial_reports || []);
   state.latest.evidenceItems = data.evidence_items || [];
   renderEvidence([]);
@@ -1954,9 +1981,10 @@ function showSystemStatus() {
   applyLanguage();
 }
 
-function renderDataSources(sources, capabilities, syncLogs) {
+function renderDataSources(sources, capabilities, syncLogs, marketDataSummary = { by_type: [], top_symbols: [] }) {
   state.latest.dataSources = sources;
   state.latest.syncLogs = syncLogs;
+  state.latest.marketDataSummary = marketDataSummary;
   els.dataSourcesView.innerHTML = "";
 }
 
@@ -2002,6 +2030,74 @@ function showSyncLogs() {
   `;
   els.syncLogsModal.classList.remove("hidden");
   applyLanguage();
+}
+
+async function showMarketData() {
+  const response = await fetch("/api/market-data?limit=30");
+  const data = await response.json();
+  if (!response.ok) throw new Error(localizeText(data.error || "Request failed"));
+  state.latest.marketRecords = data.market_records || [];
+  state.latest.marketDataSummary =
+    data.market_data_summary || state.latest.marketDataSummary || { by_type: [], top_symbols: [] };
+  els.marketDataView.innerHTML = `
+    ${renderMarketDataSummary(state.latest.marketDataSummary)}
+    <div class="item">
+      <strong>${t("Recent Market Records")}</strong>
+    </div>
+    ${renderMarketRecords(state.latest.marketRecords)}
+  `;
+  showModal(els.marketDataModal);
+}
+
+function renderMarketDataSummary(summary) {
+  const byType = summary.by_type || [];
+  const topSymbols = summary.top_symbols || [];
+  if (!byType.length && !topSymbols.length) {
+    return `<div class="empty">${t("No market data saved yet.")}</div>`;
+  }
+  return `
+    <div class="item">
+      <strong>${t("Market Data Summary")}</strong>
+      ${
+        byType.length
+          ? byType
+              .map(
+                (item) => `
+                  <div class="muted">
+                    ${escapeHtml(localizeText(item.data_type))}: ${t("Rows")} ${item.row_count}
+                    / ${t("First")} ${escapeHtml(item.first_timestamp || "")}
+                    / ${t("Latest")} ${escapeHtml(item.last_timestamp || "")}
+                  </div>
+                `
+              )
+              .join("")
+          : ""
+      }
+      ${
+        topSymbols.length
+          ? `<div class="muted">${t("Top Symbols")}: ${topSymbols
+              .map((item) => `${escapeHtml(item.symbol)}(${item.row_count})`)
+              .join(" / ")}</div>`
+          : ""
+      }
+    </div>
+  `;
+}
+
+function renderMarketRecords(records) {
+  return records.length
+    ? records
+        .map(
+          (item) => `
+            <div class="item">
+              <strong>${escapeHtml(item.symbol)} / ${escapeHtml(localizeText(item.data_type))} / ${escapeHtml(item.timestamp)}</strong>
+              <div class="muted">${escapeHtml(item.provider_name)} / ${escapeHtml(item.source || "")}</div>
+              <div class="muted">${escapeHtml(JSON.stringify(item.fields || {}))}</div>
+            </div>
+          `
+        )
+        .join("")
+    : `<div class="empty">${t("No market data saved yet.")}</div>`;
 }
 
 function renderFinancialReportResult(summary) {
@@ -2109,6 +2205,8 @@ function renderLegacyCardSuggestionText(summary) {
 function renderImportResult(result, options = {}) {
   const errors = result.errors || [];
   const samples = result.sample_items || [];
+  const marketSamples = result.sample_market_records || [];
+  const priceUpdate = result.position_price_update || {};
   const canImport = result.can_import && !result.commit;
   const confirmAction = options.capability ? "confirm-sync" : "confirm-import";
   const confirmAttrs = options.capability
@@ -2118,11 +2216,22 @@ function renderImportResult(result, options = {}) {
     <div class="item">
       <strong>${escapeHtml(localizeText(result.kind))} ${t("import")}</strong>
       <div class="muted">${t("Rows")} ${result.row_count ?? 0} / ${t("valid")} ${result.imported ?? 0} / ${t("skipped")} ${result.skipped ?? 0} / ${t("commit")} ${t(result.commit ? "yes" : "no")}</div>
+      <div class="muted">${t("Market Records")}: ${result.market_record_count ?? (result.market_records || marketSamples).length ?? 0}</div>
+      ${
+        result.position_price_update
+          ? `<div class="muted">${t("Position Price Updates")}: ${priceUpdate.updated_count || 0}</div>`
+          : ""
+      }
       <div class="muted">${t("Missing columns")}: ${(result.missing_columns || []).map(escapeHtml).join(", ") || t("None")}</div>
       <div class="muted">${errors.map(escapeHtml).join("<br />") || t("No errors")}</div>
       ${
         samples.length
           ? `<details class="rule-results"><summary>${t("Preview Rows")} (${samples.length})</summary><div class="muted">${samples.map((item) => escapeHtml(JSON.stringify(item))).join("<br />")}</div></details>`
+          : ""
+      }
+      ${
+        marketSamples.length
+          ? `<details class="rule-results"><summary>${t("Market Records")} (${marketSamples.length})</summary><div class="muted">${marketSamples.map((item) => escapeHtml(JSON.stringify(item))).join("<br />")}</div></details>`
           : ""
       }
       ${
@@ -2463,12 +2572,14 @@ function renderCards(cards) {
     .join("");
 }
 
-function renderTrades(trades) {
+function renderTrades(trades, reconciliation = {}) {
+  state.latest.tradeReconciliation = reconciliation;
+  const summary = renderTradeReconciliation(reconciliation);
   if (!trades.length) {
-    els.tradesView.innerHTML = `<div class="empty">${t("No trades imported.")}</div>`;
+    els.tradesView.innerHTML = `${summary}<div class="empty">${t("No trades imported.")}</div>`;
     return;
   }
-  els.tradesView.innerHTML = trades
+  els.tradesView.innerHTML = summary + trades
     .slice(-8)
     .reverse()
     .map((trade) => `
@@ -2479,6 +2590,27 @@ function renderTrades(trades) {
       </div>
     `)
     .join("");
+}
+
+function renderTradeReconciliation(reconciliation = {}) {
+  const totals = reconciliation.totals || {};
+  const warnings = reconciliation.warnings || [];
+  return `
+    <div class="item">
+      <strong>${t("Trade Reconciliation")}</strong>
+      <div class="muted">
+        ${t("Cash Flow")} ${Number(totals.cash_flow || 0).toFixed(2)}
+        / ${t("Realized PnL")} ${Number(totals.realized_pnl || 0).toFixed(2)}
+        / ${t("Unrealized PnL")} ${Number(totals.unrealized_pnl || 0).toFixed(2)}
+      </div>
+      <div class="muted">
+        ${t("Open Positions")} ${totals.open_position_count || 0}
+        / ${t("Fees")} ${Number(totals.fees || 0).toFixed(2)}
+        / ${t("Trades")} ${totals.trade_count || 0}
+      </div>
+      <div class="muted">${warnings.length ? warnings.map(localizeText).map(escapeHtml).join("<br />") : t("No reconciliation warning.")}</div>
+    </div>
+  `;
 }
 
 function renderPositions(positions) {

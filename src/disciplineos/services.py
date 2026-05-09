@@ -45,6 +45,7 @@ from .review_engine import build_review_attribution, build_rule_revision_suggest
 from .rules import build_rule_results, evaluate_decision, list_rule_specs
 from .scoring import calculate_discipline_score
 from .repositories import DisciplineRepository
+from .trade_reconciliation import reconcile_trades
 from .violation_catalog import VIOLATION_CATALOG
 
 
@@ -107,6 +108,92 @@ class DisciplineService:
 
     def list_data_sync_logs(self, limit: int = 20) -> list[dict]:
         return self.repository.list_data_sync_logs(limit=limit)
+
+    def list_market_records(
+        self,
+        symbol: str | None = None,
+        data_type: str | None = None,
+        limit: int = 200,
+    ) -> list[dict]:
+        return self.repository.list_market_records(
+            symbol=symbol,
+            data_type=data_type,
+            limit=limit,
+        )
+
+    def market_data_summary(self) -> dict:
+        return self.repository.market_data_summary()
+
+    def update_position_prices_from_market_data(
+        self,
+        symbols: list[str] | None = None,
+    ) -> dict:
+        positions = self.list_positions()
+        target_symbols = {
+            str(symbol).strip().upper()
+            for symbol in (symbols or positions.keys())
+            if str(symbol).strip()
+        }
+        if not positions or not target_symbols:
+            return {
+                "updated_count": 0,
+                "updated": [],
+                "skipped": [],
+                "warnings": [],
+            }
+
+        latest_prices: dict[str, dict] = {}
+        for data_type in ("price_5min", "price_daily"):
+            records = self.list_market_records(data_type=data_type, limit=1000)
+            for record in records:
+                symbol = str(record.get("symbol", "")).strip().upper()
+                if symbol not in target_symbols:
+                    continue
+                close = _market_close(record)
+                if close is None:
+                    continue
+                existing = latest_prices.get(symbol)
+                if existing and str(existing.get("timestamp", "")) >= str(
+                    record.get("timestamp", "")
+                ):
+                    continue
+                latest_prices[symbol] = {
+                    "symbol": symbol,
+                    "data_type": data_type,
+                    "timestamp": str(record.get("timestamp", "")),
+                    "price": close,
+                    "provider_name": str(record.get("provider_name", "")),
+                }
+
+        updated = []
+        skipped = []
+        for symbol in sorted(target_symbols):
+            if symbol not in positions:
+                skipped.append({"symbol": symbol, "reason": "no_position"})
+                continue
+            latest = latest_prices.get(symbol)
+            if not latest:
+                skipped.append({"symbol": symbol, "reason": "no_market_price"})
+                continue
+            position = dict(positions[symbol])
+            old_price = float(position.get("current_price") or 0)
+            position["current_price"] = latest["price"]
+            positions[symbol] = position
+            updated.append(
+                {
+                    **latest,
+                    "old_price": old_price,
+                    "new_price": latest["price"],
+                }
+            )
+        if updated:
+            self.store.write("positions.json", positions)
+        return {
+            "updated_count": len(updated),
+            "updated": updated,
+            "skipped": skipped,
+            "warnings": [],
+        }
 
     def save_capability(self, payload: dict) -> dict:
         mapping = {
@@ -498,11 +585,27 @@ class DisciplineService:
 
     def save_trade(self, trade: Trade) -> None:
         self.store.append("trades.json", to_dict(trade))
+        self.reconcile_trade_positions(commit=True)
 
     def save_trade_dict(self, payload: dict) -> Trade:
         trade = trade_from_dict(payload)
         self.save_trade(trade)
         return trade
+
+    def reconcile_trade_positions(self, commit: bool = False) -> dict:
+        current_positions = self.list_positions()
+        report = reconcile_trades(
+            self.list_trades(),
+            position_metadata=current_positions,
+        )
+        if commit:
+            merged = dict(current_positions)
+            for symbol in list(report["by_symbol"].keys()):
+                if symbol in merged:
+                    del merged[symbol]
+            merged.update(report["positions"])
+            self.store.write("positions.json", merged)
+        return report
 
     def preview_import_file(self, kind: str, path: str) -> dict:
         return self.import_file(kind, path, commit=False)
@@ -526,6 +629,9 @@ class DisciplineService:
         elif kind == "trades":
             for item in result.items:
                 self.save_trade_dict(item)
+            payload["trade_reconciliation"] = self.reconcile_trade_positions(
+                commit=True
+            )
         return payload
 
     def sync_from_connector(
@@ -549,6 +655,11 @@ class DisciplineService:
                 for item in result.items
                 if str(item.get("symbol", "")).upper() == symbol_filter
             ]
+            result.market_records = [
+                item
+                for item in result.market_records
+                if str(item.get("symbol", "")).upper() == symbol_filter
+            ]
             result.imported = len(result.items)
             payload = to_dict(result)
             payload["symbol_filter"] = symbol_filter
@@ -558,8 +669,10 @@ class DisciplineService:
             payload.get("items")
         )
         payload["sample_items"] = payload.get("items", [])[:5]
+        payload["sample_market_records"] = payload.get("market_records", [])[:5]
         if not commit:
             payload["items"] = []
+            payload["market_records"] = []
             return payload
         if not payload["can_import"]:
             return payload
@@ -569,11 +682,28 @@ class DisciplineService:
         elif capability == "trades":
             for item in result.items:
                 self.save_trade_dict(item)
+            payload["trade_reconciliation"] = self.reconcile_trade_positions(
+                commit=True
+            )
         elif capability in {"price_daily", "price_5min", "volume", "financial_metrics"}:
+            saved_market_records = self.repository.save_market_records(
+                result.market_records
+            )
             saved_items = []
             for item in result.items:
                 saved_items.append(self.save_evidence_dict(item))
             payload["items"] = saved_items
+            payload["market_records"] = saved_market_records
+            payload["market_record_count"] = len(saved_market_records)
+            if capability in {"price_daily", "price_5min"}:
+                payload["position_price_update"] = (
+                    self.update_position_prices_from_market_data(
+                        symbols=[
+                            str(item.get("symbol", "")).upper()
+                            for item in saved_market_records
+                        ]
+                    )
+                )
         return payload
 
     def list_financial_reports(self) -> list[dict]:
@@ -696,6 +826,7 @@ class DisciplineService:
             "data_sources": self.list_data_sources(),
             "data_capabilities": self.list_capabilities(),
             "data_sync_logs": self.list_data_sync_logs(limit=10),
+            "market_data_summary": self.market_data_summary(),
             "card_templates": self.list_card_templates(),
             "rule_specs": list_rule_specs(),
             "violation_catalog": {
@@ -704,6 +835,7 @@ class DisciplineService:
             "cards": self.list_cards(),
             "positions": self.list_positions(),
             "trades": self.list_trades(),
+            "trade_reconciliation": self.reconcile_trade_positions(commit=False),
             "financial_reports": self.list_financial_reports(),
             "evidence_items": self.list_evidence(limit=30),
             "ai_runs": self.list_ai_runs(limit=8),
@@ -1518,3 +1650,16 @@ def _as_number(value: object) -> float:
         return float(value or 0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _market_close(record: dict) -> float | None:
+    fields = record.get("fields") or {}
+    if not isinstance(fields, dict):
+        return None
+    value = fields.get("close")
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

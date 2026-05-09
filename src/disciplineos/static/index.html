@@ -138,6 +138,7 @@
           </form>
           <div id="importResult" class="result empty">No sync preview yet.</div>
           <div class="item-actions">
+            <button type="button" data-action="show-market-data">View Market Data</button>
             <button type="button" data-action="show-sync-logs">View Data Source Status</button>
           </div>
           <div id="dataSourcesView" class="list"></div>
@@ -610,6 +611,16 @@
           <button type="button" data-sync-logs-action="close">Close</button>
         </div>
         <div id="syncLogsView" class="list"></div>
+      </div>
+    </div>
+
+    <div id="marketDataModal" class="path-browser hidden" role="dialog" aria-modal="true">
+      <div class="path-browser-panel wide-modal">
+        <div class="section-title">
+          <h2>Market Data</h2>
+          <button type="button" data-modal-close="marketDataModal">Close</button>
+        </div>
+        <div id="marketDataView" class="list"></div>
       </div>
     </div>
 

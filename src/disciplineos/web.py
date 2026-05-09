@@ -57,6 +57,27 @@ class DisciplineHandler(BaseHTTPRequestHandler):
                     "data_sources": self.discipline_service.list_data_sources(),
                     "data_capabilities": self.discipline_service.list_capabilities(),
                     "data_sync_logs": self.discipline_service.list_data_sync_logs(),
+                    "market_data_summary": self.discipline_service.market_data_summary(),
+                }
+            )
+            return
+        if parsed.path == "/api/market-data":
+            query = parse_qs(parsed.query)
+            symbol = query.get("symbol", [None])[0]
+            data_type = query.get("data_type", [None])[0]
+            limit_text = query.get("limit", ["200"])[0]
+            try:
+                limit = max(1, min(1000, int(limit_text)))
+            except ValueError:
+                limit = 200
+            self._send_json(
+                {
+                    "market_records": self.discipline_service.list_market_records(
+                        symbol=symbol,
+                        data_type=data_type,
+                        limit=limit,
+                    ),
+                    "market_data_summary": self.discipline_service.market_data_summary(),
                 }
             )
             return
