@@ -57,6 +57,7 @@ class DisciplineHandler(BaseHTTPRequestHandler):
                     "data_sources": self.discipline_service.list_data_sources(),
                     "data_capabilities": self.discipline_service.list_capabilities(),
                     "data_sync_logs": self.discipline_service.list_data_sync_logs(),
+                    "data_sync_state": self.discipline_service.list_data_sync_state(),
                     "market_data_summary": self.discipline_service.market_data_summary(),
                 }
             )

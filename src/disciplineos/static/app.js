@@ -18,6 +18,7 @@ const state = {
     financialReports: [],
     infoAnalysisSummary: null,
     syncLogs: [],
+    syncState: [],
     marketDataSummary: { by_type: [], top_symbols: [] },
     marketRecords: [],
     tradeReconciliation: { totals: {}, warnings: [], by_symbol: {} },
@@ -323,6 +324,8 @@ const I18N = {
     "Market Records": "行情记录",
     "Position Price Updates": "持仓价格更新",
     "Field Mapping": "字段映射",
+    "Preview Rows": "预览行",
+    "Preview Market Records": "预览行情记录",
     "Cash Account": "现金账户",
     "Cash In": "现金流入",
     "Cash Out": "现金流出",
@@ -585,6 +588,10 @@ Object.assign(I18N.zh, {
   "Sync Logs": "同步日志",
   "View Data Source Status": "查看数据源状态",
   "Data Source Status": "数据源状态",
+  "Recent Sync State": "最近同步状态",
+  "Last success": "最近成功",
+  "Last source timestamp": "最近源数据时间",
+  "No sync state yet.": "尚无同步状态。",
   "Backup Archives": "备份归档",
   "No backup archive yet.": "尚无备份归档。",
   "Restore": "恢复",
@@ -1079,6 +1086,33 @@ Object.assign(I18N.zh, {
   "Theme": "主题",
   "Market": "市场",
   "Currency": "币种",
+  "id": "ID",
+  "symbol": "标的代码",
+  "name": "名称",
+  "asset_type": "资产类型",
+  "market": "市场",
+  "sector": "行业",
+  "theme": "主题",
+  "quantity": "数量",
+  "cost_price": "成本价",
+  "current_price": "当前价",
+  "provider_name": "数据源",
+  "provider_type": "数据源类型",
+  "data_type": "数据类型",
+  "timestamp": "时间",
+  "open_price": "开盘价",
+  "high_price": "最高价",
+  "low_price": "最低价",
+  "close_price": "收盘价",
+  "volume": "成交量",
+  "amount": "成交额",
+  "metric": "指标",
+  "value": "数值",
+  "source": "来源",
+  "action": "操作",
+  "price": "价格",
+  "fees": "费用",
+  "notes": "备注",
   "storage_mode": "存储模式",
   "strict_mode": "严格模式",
   "ai_enabled": "AI 层",
@@ -1853,7 +1887,8 @@ function renderDashboard(data) {
     data.data_sources || [],
     data.data_capabilities || [],
     data.data_sync_logs || [],
-    data.market_data_summary || { by_type: [], top_symbols: [] }
+    data.market_data_summary || { by_type: [], top_symbols: [] },
+    data.data_sync_state || []
   );
   renderTemplates(data.card_templates || {});
   renderProfile(data.profile || {});
@@ -1987,10 +2022,17 @@ function showSystemStatus() {
   applyLanguage();
 }
 
-function renderDataSources(sources, capabilities, syncLogs, marketDataSummary = { by_type: [], top_symbols: [] }) {
+function renderDataSources(
+  sources,
+  capabilities,
+  syncLogs,
+  marketDataSummary = { by_type: [], top_symbols: [] },
+  syncState = []
+) {
   state.latest.dataSources = sources;
   state.latest.syncLogs = syncLogs;
   state.latest.marketDataSummary = marketDataSummary;
+  state.latest.syncState = syncState;
   els.dataSourcesView.innerHTML = "";
 }
 
@@ -2026,9 +2068,31 @@ function renderSyncLogs(syncLogs) {
     : `<div class="empty">${t("No sync log yet.")}</div>`;
 }
 
+function renderSyncState(syncState) {
+  return syncState.length
+    ? syncState
+        .map(
+          (item) => `
+            <div class="item">
+              <strong>${escapeHtml(item.provider_name)} / ${escapeHtml(localizeText(item.capability))} / ${escapeHtml(item.symbol || t("All Symbols"))}</strong>
+              <div class="muted">${escapeHtml(localizeText(item.status || ""))} / ${t("Rows")} ${item.row_count || 0}</div>
+              <div class="muted">${t("Last success")}: ${escapeHtml(item.last_success_at || "--")}</div>
+              <div class="muted">${t("Last source timestamp")}: ${escapeHtml(item.last_source_timestamp || "--")}</div>
+              ${item.last_error ? `<div class="muted">${escapeHtml(localizeText(item.last_error))}</div>` : ""}
+            </div>
+          `
+        )
+        .join("")
+    : `<div class="empty">${t("No sync state yet.")}</div>`;
+}
+
 function showSyncLogs() {
   els.syncLogsView.innerHTML = `
     ${renderDataSourceStatus(state.latest.dataSources || [])}
+    <div class="item">
+      <strong>${t("Recent Sync State")}</strong>
+    </div>
+    ${renderSyncState(state.latest.syncState || [])}
     <div class="item">
       <strong>${t("Sync Logs")}</strong>
     </div>
@@ -2238,12 +2302,12 @@ function renderImportResult(result, options = {}) {
       }
       ${
         samples.length
-          ? `<details class="rule-results"><summary>${t("Preview Rows")} (${samples.length})</summary><div class="muted">${samples.map((item) => escapeHtml(JSON.stringify(item))).join("<br />")}</div></details>`
+          ? `<details class="rule-results"><summary>${t("Preview Rows")} (${samples.length})</summary>${renderPreviewTable(samples)}</details>`
           : ""
       }
       ${
         marketSamples.length
-          ? `<details class="rule-results"><summary>${t("Market Records")} (${marketSamples.length})</summary><div class="muted">${marketSamples.map((item) => escapeHtml(JSON.stringify(item))).join("<br />")}</div></details>`
+          ? `<details class="rule-results"><summary>${t("Preview Market Records")} (${marketSamples.length})</summary>${renderPreviewTable(marketSamples)}</details>`
           : ""
       }
       ${
@@ -2253,6 +2317,44 @@ function renderImportResult(result, options = {}) {
       }
     </div>
   `;
+}
+
+function renderPreviewTable(rows) {
+  const columns = Array.from(
+    rows.reduce((set, row) => {
+      Object.keys(row || {}).forEach((key) => set.add(key));
+      return set;
+    }, new Set())
+  ).slice(0, 10);
+  if (!columns.length) return "";
+  return `
+    <div class="table-wrap">
+      <table class="preview-table">
+        <thead>
+          <tr>${columns.map((column) => `<th>${escapeHtml(localizeText(column))}</th>`).join("")}</tr>
+        </thead>
+        <tbody>
+          ${rows
+            .map(
+              (row) => `
+                <tr>
+                  ${columns
+                    .map((column) => `<td>${escapeHtml(previewCellValue(row[column]))}</td>`)
+                    .join("")}
+                </tr>
+              `
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function previewCellValue(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
 }
 
 function renderFinancialReports(reports) {

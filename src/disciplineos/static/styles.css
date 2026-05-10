@@ -561,6 +561,39 @@ label > textarea {
   margin-top: 8px;
 }
 
+.table-wrap {
+  margin-top: 8px;
+  overflow-x: auto;
+}
+
+.preview-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  min-width: 640px;
+  width: 100%;
+}
+
+.preview-table th,
+.preview-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 7px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.preview-table th {
+  background: var(--panel-soft);
+  color: var(--ink);
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.preview-table td {
+  color: var(--muted);
+  max-width: 220px;
+  overflow-wrap: anywhere;
+}
+
 .muted {
   color: var(--muted);
 }
