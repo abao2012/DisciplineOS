@@ -115,6 +115,21 @@
             </label>
             <label data-source-field="api_token">API Token <input name="api_token" autocomplete="off" /></label>
             <label data-source-field="api_base_url">API Base URL <input name="api_base_url" /></label>
+            <label data-source-field="sync_policy">
+              Minimum Sync Interval (seconds)
+              <input name="min_interval_seconds" type="number" min="0" step="1" value="0" />
+              <small class="field-hint">0 means no minimum interval.</small>
+            </label>
+            <label data-source-field="sync_policy">
+              Daily Sync Limit
+              <input name="max_syncs_per_day" type="number" min="0" step="1" value="0" />
+              <small class="field-hint">0 means unlimited.</small>
+            </label>
+            <label data-source-field="sync_policy">
+              Retry Count
+              <input name="max_retries" type="number" min="0" max="5" step="1" value="1" />
+              <small class="field-hint">Used when the connector returns a temporary error.</small>
+            </label>
             <label class="check"><input name="enabled" type="checkbox" checked /> Enabled</label>
             <button class="primary wide" type="submit">Save Data Source</button>
           </form>

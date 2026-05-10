@@ -605,6 +605,13 @@ Object.assign(I18N.zh, {
   "Preview Sync": "预览同步",
   "Available Data": "可用数据",
   "Local Path": "本地路径",
+  "Minimum Sync Interval (seconds)": "最小同步间隔（秒）",
+  "Daily Sync Limit": "每日同步上限",
+  "Retry Count": "失败重试次数",
+  "0 means no minimum interval.": "0 表示不限制最小间隔。",
+  "0 means unlimited.": "0 表示不限制次数。",
+  "Used when the connector returns a temporary error.": "连接器返回临时错误时使用。",
+  "Unlimited": "不限",
   "Daily K": "日K",
   "5min K": "5分钟K",
   "Provider and capability mapping": "数据源与能力映射",
@@ -1303,7 +1310,10 @@ els.decisionSymbol.addEventListener("change", () => {
   loadDecisionEvidenceOptions(els.decisionSymbol.value);
 });
 
-els.dataSourceForm.elements.provider_type.addEventListener("change", updateDataSourceMode);
+els.dataSourceForm.elements.provider_type.addEventListener("change", () => {
+  updateDataSourceMode();
+  hydrateDataSourceFormFromSaved();
+});
 els.dataSyncForm.elements.capability.addEventListener("change", updateDataSourceMode);
 els.settingsForm.elements.ai_enabled.addEventListener("change", updateSettingsMode);
 ["style_value", "style_growth", "style_cycle", "style_dividend", "style_cash_defensive"].forEach((name) => {
@@ -1357,6 +1367,9 @@ els.dataSourceForm.addEventListener("submit", async (event) => {
       local_path: text(form, "local_path"),
       api_token: text(form, "api_token"),
       api_base_url: text(form, "api_base_url"),
+      min_interval_seconds: number(form, "min_interval_seconds"),
+      max_syncs_per_day: number(form, "max_syncs_per_day"),
+      max_retries: Math.min(5, number(form, "max_retries")),
     },
   });
   await saveAutomaticCapabilities(providerType);
@@ -1434,11 +1447,11 @@ function updateDataSourceMode() {
   if (!els.dataSourceHint) return;
   els.dataSourceHint.textContent = "";
   const visibleFields = {
-    qmt: ["local_path"],
-    tushare: ["api_token"],
-    akshare: [],
-    csv: ["local_path"],
-    excel: ["local_path"],
+    qmt: ["local_path", "sync_policy"],
+    tushare: ["api_token", "sync_policy"],
+    akshare: ["sync_policy"],
+    csv: ["local_path", "sync_policy"],
+    excel: ["local_path", "sync_policy"],
     manual: [],
   }[providerType] || [];
   document.querySelectorAll("[data-source-field]").forEach((field) => {
@@ -1447,6 +1460,31 @@ function updateDataSourceMode() {
       !visibleFields.includes(field.dataset.sourceField)
     );
   });
+}
+
+function hydrateDataSourceFormFromSaved() {
+  const providerType = els.dataSourceForm.elements.provider_type.value;
+  const source = (state.latest.dataSources || []).find(
+    (item) => item.provider_name === providerType || item.provider_type === providerType
+  );
+  if (!source) {
+    fillDataSourceConfig({});
+    return;
+  }
+  fillDataSourceConfig(source.config || {});
+  els.dataSourceForm.elements.enabled.checked = source.enabled !== false;
+}
+
+function fillDataSourceConfig(config) {
+  const defaults = {
+    local_path: "",
+    api_token: "",
+    api_base_url: "",
+    min_interval_seconds: 0,
+    max_syncs_per_day: 0,
+    max_retries: 1,
+  };
+  fillForm(els.dataSourceForm, { ...defaults, ...config });
 }
 
 els.generatorForm.addEventListener("submit", async (event) => {
@@ -1915,6 +1953,7 @@ function renderDashboard(data) {
   renderDecisionEvidenceOptions(data.evidence_items || [], els.decisionSymbol.value);
   renderStockSuggestions();
   updateDataSourceMode();
+  hydrateDataSourceFormFromSaved();
   applyLanguage();
 }
 
@@ -2045,11 +2084,25 @@ function renderDataSourceStatus(sources) {
               <strong>${escapeHtml(localizeText(source.provider_type))}</strong>
               <div class="muted">${t(source.enabled ? "enabled" : "disabled")} / ${escapeHtml(localizeText(source.test_status || "untested"))}</div>
               <div class="muted">${escapeHtml(localizeText(source.test_message || ""))}</div>
+              <div class="muted">${renderSyncPolicy(source.config || {})}</div>
             </div>
           `
         )
         .join("")
     : `<div class="empty">${t("No data source configured yet.")}</div>`;
+}
+
+function renderSyncPolicy(config) {
+  const minInterval = Number(config.min_interval_seconds || 0);
+  const dailyLimit = Number(config.max_syncs_per_day || 0);
+  const retries = Number(config.max_retries ?? 1);
+  return [
+    `${t("Minimum Sync Interval (seconds)")}: ${minInterval}`,
+    `${t("Daily Sync Limit")}: ${dailyLimit || t("Unlimited")}`,
+    `${t("Retry Count")}: ${retries}`,
+  ]
+    .map(escapeHtml)
+    .join(" / ");
 }
 
 function renderSyncLogs(syncLogs) {
