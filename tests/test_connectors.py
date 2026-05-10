@@ -1,7 +1,9 @@
 from pathlib import Path
 import types
 
+import disciplineos.services as services_module
 from disciplineos.connectors import build_connector
+from disciplineos.connectors import ConnectorResult
 from disciplineos.services import DisciplineService
 
 
@@ -251,6 +253,161 @@ def test_service_sync_filters_market_data_by_symbol(tmp_path: Path) -> None:
     assert service.list_evidence(symbol="BBB", evidence_type="price_condition")
     assert service.list_market_records(symbol="AAA") == []
     assert service.list_market_records(symbol="BBB")[0]["fields"]["close"] == 8.5
+
+
+def test_service_enforces_sync_rate_limit_and_preserves_last_success(
+    tmp_path: Path,
+) -> None:
+    csv_path = tmp_path / "prices.csv"
+    csv_path.write_text(
+        "symbol,date,close\n"
+        "AAA,2026-05-01,12.5\n",
+        encoding="utf-8",
+    )
+    service = DisciplineService(tmp_path / "data")
+    service.save_data_source(
+        {
+            "provider_name": "local_prices",
+            "provider_type": "csv",
+            "enabled": True,
+            "priority": 10,
+            "config": {
+                "local_path": str(csv_path),
+                "min_interval_seconds": 3600,
+            },
+        }
+    )
+    service.save_capability(
+        {
+            "capability": "price_daily",
+            "provider_name": "local_prices",
+            "fallback_provider": "",
+            "priority": 10,
+        }
+    )
+
+    first = service.sync_capability({"capability": "price_daily", "confirm": True})
+    second = service.sync_capability({"capability": "price_daily", "confirm": True})
+    sync_state = service.list_data_sync_state()[0]
+
+    assert first["ok"] is True
+    assert second["ok"] is False
+    assert "rate limit" in second["result"]["errors"][0]
+    assert sync_state["status"] == "error"
+    assert sync_state["last_success_at"] == first["sync_state"]["last_success_at"]
+
+
+def test_service_enforces_daily_sync_quota(tmp_path: Path) -> None:
+    csv_path = tmp_path / "prices.csv"
+    csv_path.write_text(
+        "symbol,date,close\n"
+        "AAA,2026-05-01,12.5\n",
+        encoding="utf-8",
+    )
+    service = DisciplineService(tmp_path / "data")
+    service.save_data_source(
+        {
+            "provider_name": "local_prices",
+            "provider_type": "csv",
+            "enabled": True,
+            "priority": 10,
+            "config": {
+                "local_path": str(csv_path),
+                "max_syncs_per_day": 1,
+            },
+        }
+    )
+    service.save_capability(
+        {
+            "capability": "price_daily",
+            "provider_name": "local_prices",
+            "fallback_provider": "",
+            "priority": 10,
+        }
+    )
+
+    service.sync_capability({"capability": "price_daily", "confirm": True})
+    result = service.sync_capability({"capability": "price_daily", "confirm": True})
+
+    assert result["ok"] is False
+    assert "quota exceeded" in result["result"]["errors"][0]
+
+
+def test_service_retries_transient_connector_errors(tmp_path: Path, monkeypatch) -> None:
+    calls: list[str] = []
+
+    class FlakyConnector:
+        def preview(self, capability: str) -> ConnectorResult:
+            calls.append(capability)
+            if len(calls) == 1:
+                return ConnectorResult(
+                    provider_name="local_prices",
+                    provider_type="csv",
+                    capability=capability,
+                    source="test",
+                    errors=["temporary failure"],
+                )
+            return ConnectorResult(
+                provider_name="local_prices",
+                provider_type="csv",
+                capability=capability,
+                source="test",
+                row_count=1,
+                imported=1,
+                items=[
+                    {
+                        "symbol": "AAA",
+                        "evidence_type": "price_condition",
+                        "title": "2026-05-01 close",
+                        "content": "close=12.5",
+                        "source": "test",
+                        "source_date": "2026-05-01",
+                    }
+                ],
+                market_records=[
+                    {
+                        "provider_name": "local_prices",
+                        "provider_type": "csv",
+                        "data_type": "price_daily",
+                        "symbol": "AAA",
+                        "timestamp": "2026-05-01",
+                        "fields": {"close": 12.5},
+                        "source": "test",
+                    }
+                ],
+            )
+
+    monkeypatch.setattr(
+        services_module,
+        "build_connector",
+        lambda source: FlakyConnector(),
+    )
+    source_path = tmp_path / "prices.csv"
+    source_path.write_text("symbol,date,close\n", encoding="utf-8")
+    service = DisciplineService(tmp_path / "data")
+    service.save_data_source(
+        {
+            "provider_name": "local_prices",
+            "provider_type": "csv",
+            "enabled": True,
+            "priority": 10,
+            "config": {"local_path": str(source_path), "max_retries": 1},
+        }
+    )
+    service.save_capability(
+        {
+            "capability": "price_daily",
+            "provider_name": "local_prices",
+            "fallback_provider": "",
+            "priority": 10,
+        }
+    )
+
+    result = service.sync_capability({"capability": "price_daily", "confirm": True})
+
+    assert result["ok"] is True
+    assert result["result"]["attempts"] == 2
+    assert calls == ["price_daily", "price_daily"]
 
 
 def test_csv_connector_previews_5min_k_as_evidence(tmp_path: Path) -> None:

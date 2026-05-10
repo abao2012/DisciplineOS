@@ -5,7 +5,7 @@ import shutil
 import tempfile
 import zipfile
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
@@ -227,14 +227,23 @@ class DisciplineService:
         symbol_filter = str(payload.get("symbol") or "").strip().upper()
         mapping = self._resolve_capability_mapping(capability)
         source = self._source_by_name(mapping["provider_name"])
+        sync_policy = _sync_policy(source)
 
         started_at = datetime.now(timezone.utc).isoformat()
         try:
-            result = self.sync_from_connector(
+            if confirm:
+                self._enforce_sync_budget(
+                    source=source,
+                    capability=capability,
+                    symbol=symbol_filter,
+                    sync_policy=sync_policy,
+                )
+            result, attempts = self._sync_from_connector_with_retries(
                 source,
                 capability,
                 commit=confirm,
                 symbol_filter=symbol_filter,
+                max_retries=sync_policy["max_retries"],
             )
             if not confirm:
                 status = "preview"
@@ -246,6 +255,9 @@ class DisciplineService:
                 f"{action} {result.get('imported', 0)} {capability}; "
                 f"skipped {result.get('skipped', 0)} from {result.get('source', '')}."
             )
+            if attempts > 1:
+                message += f" Attempts: {attempts}."
+            result["attempts"] = attempts
         except Exception as exc:
             status = "error"
             message = str(exc)
@@ -256,6 +268,7 @@ class DisciplineService:
                 "skipped": 0,
                 "errors": [message],
                 "items": [],
+                "attempts": 1,
             }
         finished_at = datetime.now(timezone.utc).isoformat()
         log = self.repository.save_data_sync_log(
@@ -728,6 +741,89 @@ class DisciplineService:
                     )
                 )
         return payload
+
+    def _sync_from_connector_with_retries(
+        self,
+        source: dict,
+        capability: str,
+        *,
+        commit: bool,
+        symbol_filter: str,
+        max_retries: int,
+    ) -> tuple[dict, int]:
+        attempts = max(1, max_retries + 1)
+        last_result: dict | None = None
+        for attempt in range(1, attempts + 1):
+            result = self.sync_from_connector(
+                source,
+                capability,
+                commit=commit,
+                symbol_filter=symbol_filter,
+            )
+            last_result = result
+            if not result.get("errors"):
+                return result, attempt
+            if result.get("missing_columns"):
+                return result, attempt
+        return last_result or {}, attempts
+
+    def _enforce_sync_budget(
+        self,
+        *,
+        source: dict,
+        capability: str,
+        symbol: str,
+        sync_policy: dict[str, int],
+    ) -> None:
+        provider_name = str(source.get("provider_name", ""))
+        min_interval = sync_policy["min_interval_seconds"]
+        if min_interval > 0:
+            previous = self._find_sync_state(provider_name, capability, symbol)
+            previous_at = _parse_utc(previous.get("last_success_at") if previous else "")
+            if previous_at:
+                next_allowed_at = previous_at + timedelta(seconds=min_interval)
+                now = datetime.now(timezone.utc)
+                if now < next_allowed_at:
+                    wait_seconds = int((next_allowed_at - now).total_seconds()) + 1
+                    raise ValueError(
+                        f"Sync rate limit active for {provider_name}/{capability}; "
+                        f"retry after {wait_seconds} seconds."
+                    )
+
+        max_syncs = sync_policy["max_syncs_per_day"]
+        if max_syncs > 0:
+            day_start = datetime.now(timezone.utc).replace(
+                hour=0,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
+            used = self.repository.count_data_sync_logs(
+                provider_name=provider_name,
+                sync_type=capability,
+                since=day_start.isoformat(),
+            )
+            if used >= max_syncs:
+                raise ValueError(
+                    f"Daily sync quota exceeded for {provider_name}/{capability}: "
+                    f"{used}/{max_syncs} successful syncs used."
+                )
+
+    def _find_sync_state(
+        self,
+        provider_name: str,
+        capability: str,
+        symbol: str,
+    ) -> dict:
+        normalized_symbol = symbol.strip().upper()
+        for item in self.list_data_sync_state():
+            if (
+                item.get("provider_name") == provider_name
+                and item.get("capability") == capability
+                and str(item.get("symbol") or "").upper() == normalized_symbol
+            ):
+                return item
+        return {}
 
     def list_financial_reports(self) -> list[dict]:
         return self.store.read("financial_reports.json", [])
@@ -1674,6 +1770,37 @@ def _as_number(value: object) -> float:
         return float(value or 0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _as_non_negative_int(value: object) -> int:
+    try:
+        return max(0, int(float(value or 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _sync_policy(source: dict) -> dict[str, int]:
+    config = dict(source.get("config", {}) or {})
+    return {
+        "min_interval_seconds": _as_non_negative_int(
+            config.get("min_interval_seconds")
+        ),
+        "max_syncs_per_day": _as_non_negative_int(config.get("max_syncs_per_day")),
+        "max_retries": min(5, _as_non_negative_int(config.get("max_retries"))),
+    }
+
+
+def _parse_utc(value: object) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _market_close(record: dict) -> float | None:

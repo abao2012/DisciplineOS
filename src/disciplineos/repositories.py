@@ -60,6 +60,21 @@ class DisciplineRepository:
     def list_data_sync_logs(self, limit: int = 20) -> list[dict[str, Any]]:
         return self.store.list_data_sync_logs(limit=limit)
 
+    def count_data_sync_logs(
+        self,
+        *,
+        provider_name: str,
+        sync_type: str,
+        since: str,
+        statuses: tuple[str, ...] = ("success", "partial"),
+    ) -> int:
+        return self.store.count_data_sync_logs(
+            provider_name=provider_name,
+            sync_type=sync_type,
+            since=since,
+            statuses=statuses,
+        )
+
     def save_data_sync_state(self, item: dict[str, Any]) -> dict[str, Any]:
         return self.store.save_data_sync_state(item)
 

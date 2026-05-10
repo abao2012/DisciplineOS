@@ -286,6 +286,29 @@ class SQLiteStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def count_data_sync_logs(
+        self,
+        *,
+        provider_name: str,
+        sync_type: str,
+        since: str,
+        statuses: tuple[str, ...] = ("success", "partial"),
+    ) -> int:
+        placeholders = ",".join("?" for _ in statuses)
+        with self._connect() as conn:
+            row = conn.execute(
+                f"""
+                select count(*) as count
+                from data_sync_logs
+                where provider_name = ?
+                  and sync_type = ?
+                  and started_at >= ?
+                  and status in ({placeholders})
+                """,
+                (provider_name, sync_type, since, *statuses),
+            ).fetchone()
+        return int(row["count"] if row else 0)
+
     def save_data_sync_state(self, item: dict[str, Any]) -> dict[str, Any]:
         state = {
             "provider_name": str(item["provider_name"]),
@@ -309,7 +332,7 @@ class SQLiteStore:
                 on conflict(provider_name, capability, symbol) do update set
                     status = excluded.status,
                     row_count = excluded.row_count,
-                    last_success_at = excluded.last_success_at,
+                    last_success_at = coalesce(excluded.last_success_at, data_sync_state.last_success_at),
                     last_error = excluded.last_error,
                     last_source_timestamp = excluded.last_source_timestamp,
                     updated_at = excluded.updated_at
