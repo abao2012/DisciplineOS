@@ -1,6 +1,7 @@
 from pathlib import Path
+import zipfile
 
-from disciplineos.financial_report import summarize_financial_report, summarize_financial_report_text
+from disciplineos.financial_report import read_document_text, summarize_financial_report, summarize_financial_report_text
 from disciplineos.services import DisciplineService
 
 
@@ -35,6 +36,30 @@ def test_summarize_financial_report_file(tmp_path: Path) -> None:
 
     assert summary.source == str(report_path)
     assert "guidance" in summary.guidance.lower()
+
+
+def test_summarize_financial_report_docx_file(tmp_path: Path) -> None:
+    report_path = tmp_path / "report.docx"
+    write_minimal_docx(report_path, REPORT_TEXT)
+
+    summary = summarize_financial_report(report_path, "SAMPLE", "2026Q1")
+
+    assert "Revenue increased" in summary.revenue
+    assert "Operating cash flow" in summary.cash_flow
+    assert "guidance" in summary.guidance.lower()
+    assert "double digit" in summary.guidance
+
+
+def test_read_document_text_rejects_legacy_doc(tmp_path: Path) -> None:
+    report_path = tmp_path / "report.doc"
+    report_path.write_bytes(b"legacy doc")
+
+    try:
+        read_document_text(report_path)
+    except RuntimeError as exc:
+        assert "Legacy .doc binary files are not supported" in str(exc)
+    else:
+        raise AssertionError("Expected legacy .doc parsing to fail clearly")
 
 
 def test_service_saves_financial_report_summary(tmp_path: Path) -> None:
@@ -109,3 +134,29 @@ def test_service_falls_back_to_local_rules_when_ai_config_missing(tmp_path: Path
     assert result["analysis_mode"] == "local_rules"
     assert result["ai_status"] == "failed"
     assert "Token" in result["ai_error"]
+
+
+def write_minimal_docx(path: Path, text: str) -> None:
+    paragraphs = "\n".join(
+        f"<w:p><w:r><w:t>{line}</w:t></w:r></w:p>"
+        for line in text.strip().splitlines()
+        if line.strip()
+    )
+    document_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    {paragraphs}
+  </w:body>
+</w:document>
+"""
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "[Content_Types].xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>
+""",
+        )
+        archive.writestr("word/document.xml", document_xml)

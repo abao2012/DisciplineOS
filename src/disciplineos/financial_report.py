@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import zipfile
+from xml.etree import ElementTree
 from pathlib import Path
 
 from .models import FinancialReportSummary
@@ -151,7 +153,8 @@ def build_local_analysis(evidence: list[str], metrics: dict[str, str]) -> dict:
 
 
 def _read_document_text(source: Path) -> str:
-    if source.suffix.lower() == ".pdf":
+    suffix = source.suffix.lower()
+    if suffix == ".pdf":
         try:
             from pypdf import PdfReader
         except ImportError as exc:
@@ -160,7 +163,47 @@ def _read_document_text(source: Path) -> str:
             ) from exc
         reader = PdfReader(str(source))
         return "\n".join(page.extract_text() or "" for page in reader.pages)
+    if suffix == ".docx":
+        return _read_docx_text(source)
+    if suffix == ".doc":
+        raise RuntimeError(
+            "Legacy .doc binary files are not supported yet. Save the file as .docx, PDF, Markdown, or TXT first."
+        )
     return source.read_text(encoding="utf-8-sig")
+
+
+def _read_docx_text(source: Path) -> str:
+    try:
+        with zipfile.ZipFile(source) as archive:
+            document_xml = archive.read("word/document.xml")
+    except KeyError as exc:
+        raise RuntimeError(f"DOCX document is missing word/document.xml: {source}") from exc
+    except zipfile.BadZipFile as exc:
+        raise RuntimeError(f"DOCX document is not a valid zip package: {source}") from exc
+
+    root = ElementTree.fromstring(document_xml)
+    paragraphs: list[str] = []
+    for paragraph in root.iter(_w_tag("p")):
+        text = _docx_paragraph_text(paragraph)
+        if text:
+            paragraphs.append(text)
+    return "\n".join(paragraphs)
+
+
+def _docx_paragraph_text(paragraph: ElementTree.Element) -> str:
+    parts: list[str] = []
+    for node in paragraph.iter():
+        if node.tag == _w_tag("t") and node.text:
+            parts.append(node.text)
+        elif node.tag == _w_tag("tab"):
+            parts.append("\t")
+        elif node.tag in {_w_tag("br"), _w_tag("cr")}:
+            parts.append("\n")
+    return "".join(parts).strip()
+
+
+def _w_tag(name: str) -> str:
+    return f"{{http://schemas.openxmlformats.org/wordprocessingml/2006/main}}{name}"
 
 
 def _first_match(pattern: str, text: str) -> str:
