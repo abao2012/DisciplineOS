@@ -97,6 +97,7 @@ const els = {
   syncLogsModal: document.querySelector("#syncLogsModal"),
   syncLogsView: document.querySelector("#syncLogsView"),
   marketDataModal: document.querySelector("#marketDataModal"),
+  marketDataFilterForm: document.querySelector("#marketDataFilterForm"),
   marketDataView: document.querySelector("#marketDataView"),
   infoAnalysisModal: document.querySelector("#infoAnalysisModal"),
   infoAnalysisView: document.querySelector("#infoAnalysisView"),
@@ -321,6 +322,13 @@ const I18N = {
     "Market Data Summary": "行情数据汇总",
     "Recent Market Records": "最近行情记录",
     "No market data saved yet.": "尚未保存行情数据。",
+    "Filter Market Data": "筛选行情数据",
+    "All Data Types": "全部数据类型",
+    "Limit": "数量上限",
+    "Price Chart": "价格走势图",
+    "Market Data Chart": "行情走势图",
+    "No chartable market data.": "暂无可绘制的行情数据。",
+    "Field Values": "字段值",
     "Market Records": "行情记录",
     "Position Price Updates": "持仓价格更新",
     "Field Mapping": "字段映射",
@@ -1409,6 +1417,13 @@ els.dataSyncForm.addEventListener("submit", async (event) => {
   await loadDashboard();
 });
 
+if (els.marketDataFilterForm) {
+  els.marketDataFilterForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await showMarketData();
+  });
+}
+
 async function saveAutomaticCapabilities(providerType) {
   const capabilities = capabilitiesForProvider(providerType);
   await Promise.all(
@@ -2156,7 +2171,8 @@ function showSyncLogs() {
 }
 
 async function showMarketData() {
-  const response = await fetch("/api/market-data?limit=30");
+  const params = marketDataFilterParams();
+  const response = await fetch(`/api/market-data?${params.toString()}`);
   const data = await response.json();
   if (!response.ok) throw new Error(localizeText(data.error || "Request failed"));
   state.latest.marketRecords = data.market_records || [];
@@ -2164,12 +2180,25 @@ async function showMarketData() {
     data.market_data_summary || state.latest.marketDataSummary || { by_type: [], top_symbols: [] };
   els.marketDataView.innerHTML = `
     ${renderMarketDataSummary(state.latest.marketDataSummary)}
+    ${renderMarketDataChart(state.latest.marketRecords)}
     <div class="item">
       <strong>${t("Recent Market Records")}</strong>
     </div>
     ${renderMarketRecords(state.latest.marketRecords)}
   `;
   showModal(els.marketDataModal);
+}
+
+function marketDataFilterParams() {
+  const params = new URLSearchParams();
+  const form = els.marketDataFilterForm ? new FormData(els.marketDataFilterForm) : null;
+  const symbol = form ? text(form, "symbol").toUpperCase() : "";
+  const dataType = form ? text(form, "data_type") : "";
+  const limit = form ? text(form, "limit") || "120" : "120";
+  if (symbol) params.set("symbol", symbol);
+  if (dataType) params.set("data_type", dataType);
+  params.set("limit", limit);
+  return params;
 }
 
 function renderMarketDataSummary(summary) {
@@ -2207,6 +2236,72 @@ function renderMarketDataSummary(summary) {
   `;
 }
 
+function renderMarketDataChart(records) {
+  const points = chartableMarketPoints(records);
+  if (points.length < 2) {
+    return `
+      <div class="item">
+        <strong>${t("Market Data Chart")}</strong>
+        <div class="empty">${t("No chartable market data.")}</div>
+      </div>
+    `;
+  }
+  const width = 760;
+  const height = 220;
+  const padding = 28;
+  const min = Math.min(...points.map((point) => point.value));
+  const max = Math.max(...points.map((point) => point.value));
+  const span = max - min || 1;
+  const step = (width - padding * 2) / Math.max(1, points.length - 1);
+  const coordinates = points.map((point, index) => {
+    const x = padding + index * step;
+    const y = height - padding - ((point.value - min) / span) * (height - padding * 2);
+    return { ...point, x, y };
+  });
+  const line = coordinates.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
+  const first = coordinates[0];
+  const last = coordinates[coordinates.length - 1];
+  return `
+    <div class="item market-chart-card">
+      <strong>${t("Market Data Chart")}</strong>
+      <div class="chart-meta">
+        <span>${escapeHtml(first.timestamp)}: ${formatNumber(first.value)}</span>
+        <span>${escapeHtml(last.timestamp)}: ${formatNumber(last.value)}</span>
+        <span>${t("Rows")} ${points.length}</span>
+      </div>
+      <svg class="market-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${t("Market Data Chart")}">
+        <line x1="${padding}" y1="${padding}" x2="${padding}" y2="${height - padding}" />
+        <line x1="${padding}" y1="${height - padding}" x2="${width - padding}" y2="${height - padding}" />
+        <text x="${padding}" y="18">${formatNumber(max)}</text>
+        <text x="${padding}" y="${height - 8}">${formatNumber(min)}</text>
+        <polyline points="${line}" />
+        ${coordinates
+          .filter((_, index) => index === 0 || index === coordinates.length - 1)
+          .map((point) => `<circle cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="4" />`)
+          .join("")}
+      </svg>
+    </div>
+  `;
+}
+
+function chartableMarketPoints(records) {
+  return (records || [])
+    .map((record) => {
+      const fields = record.fields || {};
+      const value =
+        numberOrNull(fields.close) ??
+        numberOrNull(fields.value) ??
+        numberOrNull(fields.volume);
+      if (value === null) return null;
+      return {
+        timestamp: String(record.timestamp || ""),
+        value,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.timestamp.localeCompare(right.timestamp));
+}
+
 function renderMarketRecords(records) {
   return records.length
     ? records
@@ -2215,12 +2310,20 @@ function renderMarketRecords(records) {
             <div class="item">
               <strong>${escapeHtml(item.symbol)} / ${escapeHtml(localizeText(item.data_type))} / ${escapeHtml(item.timestamp)}</strong>
               <div class="muted">${escapeHtml(item.provider_name)} / ${escapeHtml(item.source || "")}</div>
-              <div class="muted">${escapeHtml(JSON.stringify(item.fields || {}))}</div>
+              <div class="muted">${renderFieldValues(item.fields || {})}</div>
             </div>
           `
         )
         .join("")
     : `<div class="empty">${t("No market data saved yet.")}</div>`;
+}
+
+function renderFieldValues(fields) {
+  const entries = Object.entries(fields || {});
+  if (!entries.length) return t("None");
+  return entries
+    .map(([key, value]) => `${escapeHtml(localizeText(key))}: ${escapeHtml(formatFieldValue(value))}`)
+    .join(" / ");
 }
 
 function renderFinancialReportResult(summary) {
@@ -3296,6 +3399,28 @@ function text(form, key) {
 
 function number(form, key) {
   return Number(form.get(key) || 0);
+}
+
+function numberOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatNumber(value) {
+  const parsed = numberOrNull(value);
+  if (parsed === null) return "";
+  return new Intl.NumberFormat(state.lang === "zh" ? "zh-CN" : "en-US", {
+    maximumFractionDigits: 4,
+  }).format(parsed);
+}
+
+function formatFieldValue(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "number") return formatNumber(value);
+  if (typeof value === "object") return JSON.stringify(value);
+  const parsed = numberOrNull(value);
+  return parsed === null ? String(value) : formatNumber(parsed);
 }
 
 function lines(form, key) {

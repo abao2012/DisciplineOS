@@ -635,6 +635,32 @@
           <h2>Market Data</h2>
           <button type="button" data-modal-close="marketDataModal">Close</button>
         </div>
+        <form id="marketDataFilterForm" class="form">
+          <label>
+            Symbol
+            <input name="symbol" list="stockSuggestions" placeholder="300750" />
+          </label>
+          <label>
+            Data Type
+            <select name="data_type">
+              <option value="">All Data Types</option>
+              <option value="price_daily">Daily K</option>
+              <option value="price_5min">5min K</option>
+              <option value="volume">Volume</option>
+              <option value="financial_metrics">Financial Metrics</option>
+            </select>
+          </label>
+          <label>
+            Limit
+            <select name="limit">
+              <option value="60">60</option>
+              <option value="120" selected>120</option>
+              <option value="240">240</option>
+              <option value="500">500</option>
+            </select>
+          </label>
+          <button class="primary" type="submit">Filter Market Data</button>
+        </form>
         <div id="marketDataView" class="list"></div>
       </div>
     </div>

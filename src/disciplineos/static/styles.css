@@ -594,6 +594,51 @@ label > textarea {
   overflow-wrap: anywhere;
 }
 
+.market-chart-card {
+  overflow: hidden;
+}
+
+.chart-meta {
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 10px;
+  margin: 4px 0 8px;
+}
+
+.market-chart {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  display: block;
+  height: auto;
+  max-height: 260px;
+  width: 100%;
+}
+
+.market-chart line {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+
+.market-chart polyline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3;
+}
+
+.market-chart circle {
+  fill: var(--accent);
+}
+
+.market-chart text {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
 .muted {
   color: var(--muted);
 }
