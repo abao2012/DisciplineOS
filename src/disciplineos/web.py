@@ -276,8 +276,11 @@ class DisciplineHandler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/api/backups":
+            payload = self._read_json()
             try:
-                backup = self.discipline_service.create_backup()
+                backup = self.discipline_service.create_backup(
+                    passphrase=str(payload.get("passphrase", ""))
+                )
             except Exception as exc:
                 self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
                 return
@@ -291,7 +294,10 @@ class DisciplineHandler(BaseHTTPRequestHandler):
                 self._send_error(HTTPStatus.BAD_REQUEST, "Missing filename")
                 return
             try:
-                restored = self.discipline_service.restore_backup(filename)
+                restored = self.discipline_service.restore_backup(
+                    filename,
+                    passphrase=str(payload.get("passphrase", "")),
+                )
             except Exception as exc:
                 self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
                 return

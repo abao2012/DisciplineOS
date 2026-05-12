@@ -376,6 +376,24 @@ disciplineos review --month 2026-05 --data-dir .\data
 disciplineos migrations --data-dir .\data
 ```
 
+创建普通备份：
+
+```powershell
+disciplineos backup --data-dir .\data
+```
+
+创建口令加密备份：
+
+```powershell
+disciplineos backup --data-dir .\data --passphrase "your-passphrase"
+```
+
+恢复备份：
+
+```powershell
+disciplineos restore disciplineos-backup-xxx.zip --data-dir .\data --passphrase "your-passphrase"
+```
+
 运行测试：
 
 ```powershell
@@ -542,7 +560,7 @@ src/disciplineos/
 
 - 当前定位是本地单人使用，没有登录、多用户权限、角色控制和团队协作。
 - 默认使用本地 SQLite + JSON 兼容写入；设置里的 PostgreSQL 仍属于未来选项，后端尚未真正接入。
-- 本地备份/恢复可用，但没有云同步、跨设备同步、自动备份计划和备份加密。
+- 本地备份/恢复支持普通归档和口令加密归档；但没有云同步、跨设备同步、自动备份计划和系统密钥库托管。
 - 没有生产部署方案、HTTPS、反向代理配置、服务守护进程或安装器。
 - SQLite 已记录基础 schema migration 状态，并可通过 `disciplineos migrations` 查看；但还没有迁移回滚、跨大版本升级向导和独立迁移脚本目录。
 - 本地数据库、备份包和导入文件可能包含真实交易、持仓、Token、本地路径等敏感信息，公开上传前必须排除。

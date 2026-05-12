@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import hmac
+import io
 import json
+import os
 import shutil
 import tempfile
 import zipfile
 from collections import Counter
 from datetime import datetime, timedelta, timezone
-from hashlib import sha256
+from hashlib import pbkdf2_hmac, sha256
 from pathlib import Path
 from uuid import uuid4
 
@@ -408,6 +411,7 @@ class DisciplineService:
                     ),
                     "file_count": metadata.get("file_count", 0),
                     "format": metadata.get("format", "zip"),
+                    "encrypted": bool(metadata.get("encrypted")),
                 }
             )
         return sorted(
@@ -1293,7 +1297,7 @@ class DisciplineService:
             ),
         }
 
-    def create_backup(self) -> dict:
+    def create_backup(self, passphrase: str = "") -> dict:
         backups_dir = self.store.data_dir / "backups"
         backups_dir.mkdir(parents=True, exist_ok=True)
         created_at = datetime.now(timezone.utc).isoformat()
@@ -1315,13 +1319,26 @@ class DisciplineService:
                 for item in source_files
             ],
         }
-        with zipfile.ZipFile(path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr("backup_manifest.json", json.dumps(manifest, indent=2))
-            for item in source_files:
-                archive.write(
-                    item,
-                    arcname=item.relative_to(self.store.data_dir).as_posix(),
-                )
+        if passphrase:
+            inner_zip = _build_backup_zip_bytes(self.store.data_dir, manifest, source_files)
+            encrypted = _encrypt_backup_payload(inner_zip, passphrase)
+            manifest = {
+                **manifest,
+                "format": "disciplineos-backup-v2-encrypted",
+                "encrypted": True,
+                **encrypted["metadata"],
+            }
+            with zipfile.ZipFile(path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("backup_manifest.json", json.dumps(manifest, indent=2))
+                archive.writestr("encrypted_payload.bin", encrypted["ciphertext"])
+        else:
+            with zipfile.ZipFile(path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("backup_manifest.json", json.dumps(manifest, indent=2))
+                for item in source_files:
+                    archive.write(
+                        item,
+                        arcname=item.relative_to(self.store.data_dir).as_posix(),
+                    )
         return {
             "path": str(path),
             "filename": path.name,
@@ -1329,17 +1346,26 @@ class DisciplineService:
             "created_at": created_at,
             "file_count": len(source_files),
             "format": manifest["format"],
+            "encrypted": bool(passphrase),
         }
 
-    def restore_backup(self, filename: str) -> dict:
+    def restore_backup(self, filename: str, passphrase: str = "") -> dict:
         backup_path = _resolve_backup_path(self.store.data_dir, filename)
         if not backup_path.exists():
             raise FileNotFoundError(f"Backup not found: {filename}")
-        _validate_backup_archive(backup_path)
+        manifest = _read_backup_manifest(backup_path)
+        encrypted = bool(manifest.get("encrypted"))
+        if encrypted and not passphrase:
+            raise ValueError("Encrypted backup requires a passphrase.")
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
-            with zipfile.ZipFile(backup_path) as archive:
-                archive.extractall(temp_path)
+            if encrypted:
+                payload = _decrypt_backup_archive(backup_path, manifest, passphrase)
+                _extract_backup_zip_bytes(payload, temp_path)
+            else:
+                _validate_backup_archive(backup_path)
+                with zipfile.ZipFile(backup_path) as archive:
+                    archive.extractall(temp_path)
             restored_files = []
             for item in temp_path.rglob("*"):
                 if not item.is_file() or item.name == "backup_manifest.json":
@@ -1355,6 +1381,7 @@ class DisciplineService:
             "restored_count": len(restored_files),
             "restored_files": restored_files,
             "restored_at": datetime.now(timezone.utc).isoformat(),
+            "encrypted": encrypted,
         }
 
     def _enrich_decision_payload(self, payload: dict) -> dict:
@@ -1683,6 +1710,89 @@ def _read_backup_manifest(path: Path) -> dict:
         return {}
 
 
+def _build_backup_zip_bytes(
+    data_dir: Path,
+    manifest: dict,
+    source_files: list[Path],
+) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("backup_manifest.json", json.dumps(manifest, indent=2))
+        for item in source_files:
+            archive.write(item, arcname=item.relative_to(data_dir).as_posix())
+    return buffer.getvalue()
+
+
+def _encrypt_backup_payload(payload: bytes, passphrase: str) -> dict:
+    salt = os.urandom(16)
+    nonce = os.urandom(16)
+    iterations = 200_000
+    enc_key, mac_key = _backup_keys(passphrase, salt, iterations)
+    ciphertext = _xor_stream(payload, enc_key, nonce)
+    tag = hmac.new(mac_key, nonce + ciphertext, sha256).hexdigest()
+    return {
+        "ciphertext": ciphertext,
+        "metadata": {
+            "kdf": "pbkdf2_hmac_sha256",
+            "iterations": iterations,
+            "salt": salt.hex(),
+            "nonce": nonce.hex(),
+            "hmac": tag,
+            "payload": "encrypted_payload.bin",
+        },
+    }
+
+
+def _decrypt_backup_archive(path: Path, manifest: dict, passphrase: str) -> bytes:
+    try:
+        salt = bytes.fromhex(str(manifest["salt"]))
+        nonce = bytes.fromhex(str(manifest["nonce"]))
+        iterations = int(manifest["iterations"])
+        expected_hmac = str(manifest["hmac"])
+        payload_name = str(manifest.get("payload") or "encrypted_payload.bin")
+        with zipfile.ZipFile(path) as archive:
+            ciphertext = archive.read(payload_name)
+    except (KeyError, ValueError, zipfile.BadZipFile) as exc:
+        raise ValueError("Encrypted backup metadata is invalid.") from exc
+    enc_key, mac_key = _backup_keys(passphrase, salt, iterations)
+    actual_hmac = hmac.new(mac_key, nonce + ciphertext, sha256).hexdigest()
+    if not hmac.compare_digest(actual_hmac, expected_hmac):
+        raise ValueError("Encrypted backup passphrase is invalid or the archive is corrupted.")
+    return _xor_stream(ciphertext, enc_key, nonce)
+
+
+def _extract_backup_zip_bytes(payload: bytes, target_dir: Path) -> None:
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        _validate_zip_members(archive)
+        archive.extractall(target_dir)
+
+
+def _backup_keys(
+    passphrase: str,
+    salt: bytes,
+    iterations: int,
+) -> tuple[bytes, bytes]:
+    material = pbkdf2_hmac(
+        "sha256",
+        passphrase.encode("utf-8"),
+        salt,
+        iterations,
+        dklen=64,
+    )
+    return material[:32], material[32:]
+
+
+def _xor_stream(payload: bytes, key: bytes, nonce: bytes) -> bytes:
+    output = bytearray()
+    counter = 0
+    for offset in range(0, len(payload), 32):
+        block = sha256(key + nonce + counter.to_bytes(8, "big")).digest()
+        chunk = payload[offset : offset + 32]
+        output.extend(byte ^ block[index] for index, byte in enumerate(chunk))
+        counter += 1
+    return bytes(output)
+
+
 def _resolve_backup_path(data_dir: Path, filename: str) -> Path:
     backups_dir = (data_dir / "backups").resolve()
     candidate = (backups_dir / Path(filename).name).resolve()
@@ -1693,12 +1803,16 @@ def _resolve_backup_path(data_dir: Path, filename: str) -> Path:
 
 def _validate_backup_archive(path: Path) -> None:
     with zipfile.ZipFile(path) as archive:
-        for info in archive.infolist():
-            member = Path(info.filename)
-            if member.is_absolute() or ".." in member.parts:
-                raise ValueError(f"Unsafe backup entry: {info.filename}")
-            if info.filename.startswith("backups/"):
-                raise ValueError(f"Backup archives cannot restore backups/: {info.filename}")
+        _validate_zip_members(archive)
+
+
+def _validate_zip_members(archive: zipfile.ZipFile) -> None:
+    for info in archive.infolist():
+        member = Path(info.filename)
+        if member.is_absolute() or ".." in member.parts:
+            raise ValueError(f"Unsafe backup entry: {info.filename}")
+        if info.filename.startswith("backups/"):
+            raise ValueError(f"Backup archives cannot restore backups/: {info.filename}")
 
 
 def _add_health_check(

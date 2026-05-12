@@ -44,6 +44,29 @@ def main(argv: list[str] | None = None) -> int:
         help="Show local SQLite schema migration status.",
     )
 
+    backup_parser = subparsers.add_parser(
+        "backup",
+        parents=[common],
+        help="Create a local backup archive.",
+    )
+    backup_parser.add_argument(
+        "--passphrase",
+        default="",
+        help="Optional passphrase for encrypted backup archives.",
+    )
+
+    restore_parser = subparsers.add_parser(
+        "restore",
+        parents=[common],
+        help="Restore a local backup archive.",
+    )
+    restore_parser.add_argument("filename", help="Backup filename in data/backups.")
+    restore_parser.add_argument(
+        "--passphrase",
+        default="",
+        help="Passphrase for encrypted backup archives.",
+    )
+
     web_parser = subparsers.add_parser(
         "web",
         parents=[common],
@@ -72,6 +95,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "migrations":
         print_json(service.schema_status())
+        return 0
+
+    if args.command == "backup":
+        print_json(service.create_backup(passphrase=args.passphrase))
+        return 0
+
+    if args.command == "restore":
+        print_json(service.restore_backup(args.filename, passphrase=args.passphrase))
         return 0
 
     if args.command == "web":
