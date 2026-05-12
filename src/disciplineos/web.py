@@ -49,12 +49,16 @@ class DisciplineHandler(BaseHTTPRequestHandler):
             self._send_json(self.discipline_service.list_card_templates())
             return
         if parsed.path == "/api/settings":
-            self._send_json(self.discipline_service.list_settings())
+            self._send_json(
+                self.discipline_service.list_settings(redact_sensitive=True)
+            )
             return
         if parsed.path == "/api/data-sources":
             self._send_json(
                 {
-                    "data_sources": self.discipline_service.list_data_sources(),
+                    "data_sources": self.discipline_service.list_data_sources(
+                        redact_sensitive=True
+                    ),
                     "data_capabilities": self.discipline_service.list_capabilities(),
                     "data_sync_logs": self.discipline_service.list_data_sync_logs(),
                     "data_sync_state": self.discipline_service.list_data_sync_state(),

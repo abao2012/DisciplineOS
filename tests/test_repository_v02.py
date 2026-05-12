@@ -94,6 +94,67 @@ def test_settings_and_data_source_configuration_persist(tmp_path: Path) -> None:
     assert reloaded.list_capabilities()[0]["fallback_provider"] == "csv"
 
 
+def test_sensitive_settings_and_source_config_are_redacted_but_preserved(tmp_path: Path) -> None:
+    service = DisciplineService(tmp_path)
+    service.save_settings(
+        {
+            "storage_mode": "sqlite",
+            "ai_enabled": True,
+            "strict_mode": True,
+            "discipline_mode": "block",
+            "ai_api_token": "secret-token",
+            "ai_api_base_url": "https://api.example.test/v1",
+            "ai_model": "test-model",
+        }
+    )
+    service.save_data_source(
+        {
+            "provider_name": "tushare",
+            "provider_type": "tushare",
+            "enabled": True,
+            "priority": 1,
+            "config": {"api_token": "tushare-secret", "symbol": "300750"},
+        }
+    )
+
+    public_settings = service.list_settings(redact_sensitive=True)
+    public_sources = service.list_data_sources(redact_sensitive=True)
+    dashboard = service.dashboard("2026-05")
+
+    assert service.list_settings()["ai_api_token"] == "secret-token"
+    assert public_settings["ai_api_token"] == "********"
+    assert public_sources[0]["config"]["api_token"] == "********"
+    assert dashboard["settings"]["ai_api_token"] == "********"
+    assert dashboard["data_sources"][0]["config"]["api_token"] == "********"
+
+    service.save_settings(
+        {
+            "storage_mode": "sqlite",
+            "ai_enabled": True,
+            "strict_mode": True,
+            "discipline_mode": "block",
+            "ai_api_token": "********",
+            "ai_api_base_url": "https://api.example.test/v2",
+            "ai_model": "test-model",
+        }
+    )
+    service.save_data_source(
+        {
+            "provider_name": "tushare",
+            "provider_type": "tushare",
+            "enabled": True,
+            "priority": 1,
+            "config": {"api_token": "********", "symbol": "600519"},
+        }
+    )
+
+    assert service.list_settings()["ai_api_token"] == "secret-token"
+    assert service.list_settings()["ai_api_base_url"].endswith("/v2")
+    saved_source = service.list_data_sources()[0]
+    assert saved_source["config"]["api_token"] == "tushare-secret"
+    assert saved_source["config"]["symbol"] == "600519"
+
+
 def test_provider_statuses_are_specific(tmp_path: Path) -> None:
     service = DisciplineService(tmp_path)
     csv_path = tmp_path / "positions.csv"

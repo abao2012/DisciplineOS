@@ -53,6 +53,9 @@ from .trade_reconciliation import reconcile_trades
 from .violation_catalog import VIOLATION_CATALOG
 
 
+REDACTED_SECRET = "********"
+
+
 class DisciplineService:
     def __init__(self, data_dir: Path | str) -> None:
         self.repository = DisciplineRepository(data_dir)
@@ -79,16 +82,21 @@ class DisciplineService:
     def list_card_templates(self) -> dict:
         return list_card_templates()
 
-    def list_settings(self) -> dict:
-        return self.repository.list_settings()
+    def list_settings(self, redact_sensitive: bool = False) -> dict:
+        settings = self.repository.list_settings()
+        return _redact_sensitive(settings) if redact_sensitive else settings
 
     def save_settings(self, payload: dict) -> dict:
+        existing = self.repository.list_settings()
+        ai_api_token = str(payload.get("ai_api_token", ""))
+        if _is_redacted_secret(ai_api_token):
+            ai_api_token = str(existing.get("ai_api_token", ""))
         settings = {
             "storage_mode": str(payload.get("storage_mode", "sqlite")),
             "ai_enabled": bool(payload.get("ai_enabled", False)),
             "strict_mode": bool(payload.get("strict_mode", True)),
             "discipline_mode": str(payload.get("discipline_mode", "block")),
-            "ai_api_token": str(payload.get("ai_api_token", "")),
+            "ai_api_token": ai_api_token,
             "ai_api_base_url": str(payload.get("ai_api_base_url", "")),
             "ai_model": str(payload.get("ai_model", "")),
             "ai_max_retries": _as_non_negative_int(payload.get("ai_max_retries", 1)),
@@ -98,16 +106,25 @@ class DisciplineService:
         }
         return self.repository.save_settings(settings)
 
-    def list_data_sources(self) -> list[dict]:
-        return self.repository.list_data_sources()
+    def list_data_sources(self, redact_sensitive: bool = False) -> list[dict]:
+        sources = self.repository.list_data_sources()
+        return _redact_sensitive(sources) if redact_sensitive else sources
 
     def save_data_source(self, payload: dict) -> dict:
+        provider_name = str(payload.get("provider_name", "")).strip()
+        config = dict(payload.get("config", {}))
+        existing = self._raw_source_by_name(provider_name)
+        if existing:
+            config = _preserve_redacted_values(
+                config,
+                dict(existing.get("config", {})),
+            )
         source = {
-            "provider_name": str(payload.get("provider_name", "")).strip(),
+            "provider_name": provider_name,
             "provider_type": str(payload.get("provider_type", "")).strip(),
             "enabled": bool(payload.get("enabled", True)),
             "priority": int(payload.get("priority", 100)),
-            "config": dict(payload.get("config", {})),
+            "config": config,
         }
         return self.repository.save_data_source(source)
 
@@ -1023,8 +1040,8 @@ class DisciplineService:
     def dashboard(self, month: str) -> dict:
         dashboard = {
             "profile": to_dict(self.load_profile()),
-            "settings": self.list_settings(),
-            "data_sources": self.list_data_sources(),
+            "settings": self.list_settings(redact_sensitive=True),
+            "data_sources": self.list_data_sources(redact_sensitive=True),
             "data_capabilities": self.list_capabilities(),
             "data_sync_logs": self.list_data_sync_logs(limit=10),
             "data_sync_state": self.list_data_sync_state(),
@@ -1512,6 +1529,14 @@ class DisciplineService:
             if source.get("provider_name") == provider_name and source.get("enabled", True):
                 return source
         raise ValueError(f"No enabled data source found: {provider_name}")
+
+    def _raw_source_by_name(self, provider_name: str) -> dict:
+        if not provider_name:
+            return {}
+        for source in self.repository.list_data_sources():
+            if source.get("provider_name") == provider_name:
+                return source
+        return {}
 
     def _build_and_save_rule_results(
         self,
@@ -2027,6 +2052,53 @@ def _estimate_ai_cost(settings: dict, usage: dict) -> float:
         (float(usage.get("prompt_tokens") or 0) / 1000 * input_rate)
         + (float(usage.get("completion_tokens") or 0) / 1000 * output_rate),
         6,
+    )
+
+
+def _redact_sensitive(value: object) -> object:
+    if isinstance(value, dict):
+        redacted = {}
+        for key, item in value.items():
+            if _is_sensitive_key(key) and item not in (None, ""):
+                redacted[key] = REDACTED_SECRET
+            else:
+                redacted[key] = _redact_sensitive(item)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_sensitive(item) for item in value]
+    return value
+
+
+def _preserve_redacted_values(new_value: object, existing_value: object) -> object:
+    if isinstance(new_value, dict):
+        existing = existing_value if isinstance(existing_value, dict) else {}
+        merged = {}
+        for key, item in new_value.items():
+            if _is_redacted_secret(item):
+                merged[key] = existing.get(key, "")
+            else:
+                merged[key] = _preserve_redacted_values(item, existing.get(key))
+        return merged
+    if isinstance(new_value, list):
+        return [
+            _preserve_redacted_values(item, None)
+            for item in new_value
+        ]
+    return new_value
+
+
+def _is_redacted_secret(value: object) -> bool:
+    return isinstance(value, str) and value == REDACTED_SECRET
+
+
+def _is_sensitive_key(key: object) -> bool:
+    normalized = str(key).lower()
+    return (
+        normalized in {"api_token", "token", "password", "passphrase", "secret", "api_key", "ai_api_token"}
+        or normalized.endswith("_token")
+        or normalized.endswith("_secret")
+        or normalized.endswith("_password")
+        or normalized.endswith("_api_key")
     )
 
 
