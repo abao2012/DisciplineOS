@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 from urllib import error, request
 
@@ -37,6 +38,7 @@ def analyze_information_with_ai(
     token = str(settings.get("ai_api_token", "")).strip()
     base_url = str(settings.get("ai_api_base_url", "")).strip().rstrip("/")
     model = str(settings.get("ai_model", "")).strip() or "gpt-5.5"
+    max_retries = _non_negative_int(settings.get("ai_max_retries", 1))
     if not token:
         raise ValueError("AI Token is empty. Please configure it in Settings first.")
     if not base_url:
@@ -69,10 +71,13 @@ def analyze_information_with_ai(
         "temperature": 0.2,
         "response_format": {"type": "json_object"},
     }
-    response = _post_json(endpoint, token, payload)
+    response = _post_json(endpoint, token, payload, max_retries=max_retries)
     content = _extract_content(response)
     parsed = _parse_json_content(content)
-    return _normalize_ai_payload(parsed)
+    normalized = _normalize_ai_payload(parsed)
+    normalized["_ai_usage"] = _normalize_usage(response.get("usage") or {})
+    normalized["_ai_model"] = model
+    return normalized
 
 
 def _build_prompt(
@@ -109,7 +114,13 @@ def _build_prompt(
     )
 
 
-def _post_json(endpoint: str, token: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _post_json(
+    endpoint: str,
+    token: str,
+    payload: dict[str, Any],
+    *,
+    max_retries: int = 1,
+) -> dict[str, Any]:
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     req = request.Request(
         endpoint,
@@ -120,14 +131,24 @@ def _post_json(endpoint: str, token: str, payload: dict[str, Any]) -> dict[str, 
         },
         method="POST",
     )
-    try:
-        with request.urlopen(req, timeout=60) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"AI API request failed: HTTP {exc.code} {body}") from exc
-    except error.URLError as exc:
-        raise RuntimeError(f"AI API request failed: {exc.reason}") from exc
+    attempts = max(1, max_retries + 1)
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            with request.urlopen(req, timeout=60) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            last_error = RuntimeError(f"AI API request failed: HTTP {exc.code} {body}")
+            if exc.code not in {408, 409, 425, 429, 500, 502, 503, 504}:
+                raise last_error from exc
+        except error.URLError as exc:
+            last_error = RuntimeError(f"AI API request failed: {exc.reason}")
+        if attempt < attempts:
+            time.sleep(min(0.2 * attempt, 1.0))
+    if last_error:
+        raise last_error
+    raise RuntimeError("AI API request failed.")
 
 
 def _extract_content(response: dict[str, Any]) -> str:
@@ -172,3 +193,22 @@ def _normalize_ai_payload(payload: dict[str, Any]) -> dict[str, Any]:
         **(payload.get("card_suggestions") or {}),
     }
     return normalized
+
+
+def _normalize_usage(usage: dict[str, Any]) -> dict[str, int]:
+    return {
+        "prompt_tokens": _non_negative_int(
+            usage.get("prompt_tokens") or usage.get("input_tokens")
+        ),
+        "completion_tokens": _non_negative_int(
+            usage.get("completion_tokens") or usage.get("output_tokens")
+        ),
+        "total_tokens": _non_negative_int(usage.get("total_tokens")),
+    }
+
+
+def _non_negative_int(value: object) -> int:
+    try:
+        return max(0, int(float(value or 0)))
+    except (TypeError, ValueError):
+        return 0

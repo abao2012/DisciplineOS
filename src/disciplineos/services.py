@@ -91,6 +91,10 @@ class DisciplineService:
             "ai_api_token": str(payload.get("ai_api_token", "")),
             "ai_api_base_url": str(payload.get("ai_api_base_url", "")),
             "ai_model": str(payload.get("ai_model", "")),
+            "ai_max_retries": _as_non_negative_int(payload.get("ai_max_retries", 1)),
+            "ai_monthly_budget_usd": max(0.0, _as_number(payload.get("ai_monthly_budget_usd", 0))),
+            "ai_cost_per_1k_input_usd": max(0.0, _as_number(payload.get("ai_cost_per_1k_input_usd", 0))),
+            "ai_cost_per_1k_output_usd": max(0.0, _as_number(payload.get("ai_cost_per_1k_output_usd", 0))),
         }
         return self.repository.save_settings(settings)
 
@@ -352,6 +356,54 @@ class DisciplineService:
     def list_ai_runs(self, limit: int = 20) -> list[dict]:
         return self.repository.list_ai_runs(limit=limit)
 
+    def ai_usage_summary(self, month: str | None = None) -> dict:
+        target_month = month or datetime.now(timezone.utc).strftime("%Y-%m")
+        runs = [
+            item
+            for item in self.repository.list_ai_runs(limit=10000)
+            if str(item.get("created_at", "")).startswith(target_month)
+        ]
+        total_cost = 0.0
+        prompt_tokens = 0
+        completion_tokens = 0
+        total_tokens = 0
+        by_agent: dict[str, dict] = {}
+        for run in runs:
+            accounting = (run.get("output") or {}).get("_ai_accounting") or {}
+            usage = accounting.get("usage") or {}
+            cost = float(accounting.get("estimated_cost_usd") or 0)
+            prompt = int(usage.get("prompt_tokens") or 0)
+            completion = int(usage.get("completion_tokens") or 0)
+            total = int(usage.get("total_tokens") or prompt + completion)
+            agent = str(run.get("agent_type") or "unknown")
+            bucket = by_agent.setdefault(
+                agent,
+                {"run_count": 0, "estimated_cost_usd": 0.0, "total_tokens": 0},
+            )
+            bucket["run_count"] += 1
+            bucket["estimated_cost_usd"] = round(
+                bucket["estimated_cost_usd"] + cost,
+                6,
+            )
+            bucket["total_tokens"] += total
+            total_cost += cost
+            prompt_tokens += prompt
+            completion_tokens += completion
+            total_tokens += total
+        settings = self.list_settings()
+        budget = float(settings.get("ai_monthly_budget_usd") or 0)
+        return {
+            "month": target_month,
+            "run_count": len(runs),
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "estimated_cost_usd": round(total_cost, 6),
+            "monthly_budget_usd": budget,
+            "budget_remaining_usd": round(budget - total_cost, 6) if budget else None,
+            "by_agent": by_agent,
+        }
+
     def list_rule_results(
         self, decision_id: str | None = None, limit: int = 200
     ) -> list[dict]:
@@ -567,13 +619,22 @@ class DisciplineService:
         output_payload: dict,
         compliance_status: str,
         ai_enabled: bool,
+        usage: dict | None = None,
+        estimated_cost_usd: float = 0.0,
+        run_status: str = "success",
     ) -> dict:
+        output = dict(output_payload)
+        output["_ai_accounting"] = {
+            "usage": usage or _estimate_usage(input_payload, output_payload),
+            "estimated_cost_usd": round(float(estimated_cost_usd or 0), 6),
+            "status": run_status,
+        }
         return self.repository.save_ai_run(
             {
                 "id": str(uuid4()),
                 "agent_type": agent_type,
                 "input_hash": input_hash(input_payload),
-                "output": output_payload,
+                "output": output,
                 "compliance_status": compliance_status,
                 "ai_enabled": ai_enabled,
                 "created_at": datetime.now(timezone.utc).isoformat(),
@@ -980,6 +1041,7 @@ class DisciplineService:
             "financial_reports": self.list_financial_reports(),
             "evidence_items": self.list_evidence(limit=30),
             "ai_runs": self.list_ai_runs(limit=8),
+            "ai_usage": self.ai_usage_summary(month),
             "position_guard": self.position_guard(),
             "decisions": self.store.read("decisions.json", []),
             "audits": self.store.read("audits.json", []),
@@ -1034,6 +1096,15 @@ class DisciplineService:
             summary.ai_status = "disabled"
             return summary
         try:
+            self._assert_ai_budget_available(settings)
+            input_payload = {
+                "symbol": summary.symbol,
+                "period": summary.period,
+                "material_type": summary.material_type,
+                "source": summary.source,
+                "ai_online_search": ai_online_search,
+                "text_chars": len(text),
+            }
             ai_payload = analyze_information_with_ai(
                 text=text,
                 symbol=summary.symbol,
@@ -1043,6 +1114,8 @@ class DisciplineService:
                 settings=settings,
             )
             sanitized, compliance_status = sanitize_ai_output(ai_payload)
+            usage = _usage_from_payload(ai_payload, input_payload, sanitized)
+            estimated_cost = _estimate_ai_cost(settings, usage)
             summary = apply_analysis_payload(
                 summary,
                 sanitized,
@@ -1051,23 +1124,28 @@ class DisciplineService:
             )
             self.save_ai_run(
                 agent_type="info_analysis",
-                input_payload={
-                    "symbol": summary.symbol,
-                    "period": summary.period,
-                    "material_type": summary.material_type,
-                    "source": summary.source,
-                    "ai_online_search": ai_online_search,
-                    "text_chars": len(text),
-                },
+                input_payload=input_payload,
                 output_payload=sanitized,
                 compliance_status=compliance_status,
                 ai_enabled=True,
+                usage=usage,
+                estimated_cost_usd=estimated_cost,
             )
         except Exception as exc:
             summary.analysis_mode = "local_rules"
             summary.ai_status = "failed"
             summary.ai_error = str(exc)
         return summary
+
+    def _assert_ai_budget_available(self, settings: dict) -> None:
+        budget = float(settings.get("ai_monthly_budget_usd") or 0)
+        if budget <= 0:
+            return
+        usage = self.ai_usage_summary(datetime.now(timezone.utc).strftime("%Y-%m"))
+        if float(usage["estimated_cost_usd"]) >= budget:
+            raise RuntimeError(
+                f"AI monthly budget exceeded: {usage['estimated_cost_usd']}/{budget} USD."
+            )
 
     def resolve_violation(self, violation_id: str, note: str = "") -> bool:
         violations = self.store.read("violations.json", [])
@@ -1908,6 +1986,48 @@ def _as_non_negative_int(value: object) -> int:
         return max(0, int(float(value or 0)))
     except (TypeError, ValueError):
         return 0
+
+
+def _estimate_usage(input_payload: dict, output_payload: dict) -> dict[str, int]:
+    prompt_tokens = max(1, len(json.dumps(input_payload, ensure_ascii=False)) // 4)
+    completion_tokens = max(1, len(json.dumps(output_payload, ensure_ascii=False)) // 4)
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": prompt_tokens + completion_tokens,
+    }
+
+
+def _usage_from_payload(
+    ai_payload: dict,
+    input_payload: dict,
+    output_payload: dict,
+) -> dict[str, int]:
+    usage = ai_payload.get("_ai_usage") if isinstance(ai_payload, dict) else {}
+    if not isinstance(usage, dict):
+        usage = {}
+    prompt_tokens = _as_non_negative_int(usage.get("prompt_tokens"))
+    completion_tokens = _as_non_negative_int(usage.get("completion_tokens"))
+    total_tokens = _as_non_negative_int(usage.get("total_tokens"))
+    if not prompt_tokens and not completion_tokens and not total_tokens:
+        return _estimate_usage(input_payload, output_payload)
+    if not total_tokens:
+        total_tokens = prompt_tokens + completion_tokens
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+    }
+
+
+def _estimate_ai_cost(settings: dict, usage: dict) -> float:
+    input_rate = max(0.0, _as_number(settings.get("ai_cost_per_1k_input_usd")))
+    output_rate = max(0.0, _as_number(settings.get("ai_cost_per_1k_output_usd")))
+    return round(
+        (float(usage.get("prompt_tokens") or 0) / 1000 * input_rate)
+        + (float(usage.get("completion_tokens") or 0) / 1000 * output_rate),
+        6,
+    )
 
 
 def _sync_policy(source: dict) -> dict[str, int]:

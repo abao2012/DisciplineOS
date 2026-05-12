@@ -67,6 +67,17 @@ def main(argv: list[str] | None = None) -> int:
         help="Passphrase for encrypted backup archives.",
     )
 
+    ai_usage_parser = subparsers.add_parser(
+        "ai-usage",
+        parents=[common],
+        help="Show AI usage and estimated cost summary.",
+    )
+    ai_usage_parser.add_argument(
+        "--month",
+        default="",
+        help="Month in YYYY-MM format. Defaults to current UTC month.",
+    )
+
     web_parser = subparsers.add_parser(
         "web",
         parents=[common],
@@ -103,6 +114,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "restore":
         print_json(service.restore_backup(args.filename, passphrase=args.passphrase))
+        return 0
+
+    if args.command == "ai-usage":
+        print_json(service.ai_usage_summary(args.month or None))
         return 0
 
     if args.command == "web":

@@ -122,6 +122,10 @@ class SQLiteStore:
             "ai_api_token": "",
             "ai_api_base_url": "",
             "ai_model": "gpt-5.5",
+            "ai_max_retries": 1,
+            "ai_monthly_budget_usd": 0,
+            "ai_cost_per_1k_input_usd": 0,
+            "ai_cost_per_1k_output_usd": 0,
         }
         return {**defaults, **settings}
 
@@ -634,6 +638,10 @@ class SQLiteStore:
                 "ai_api_token": "",
                 "ai_api_base_url": "",
                 "ai_model": "gpt-5.5",
+                "ai_max_retries": 1,
+                "ai_monthly_budget_usd": 0,
+                "ai_cost_per_1k_input_usd": 0,
+                "ai_cost_per_1k_output_usd": 0,
             }.items():
                 conn.execute(
                     """

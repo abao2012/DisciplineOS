@@ -1,6 +1,7 @@
 from pathlib import Path
 import zipfile
 
+from disciplineos.cli import main
 from disciplineos.financial_report import read_document_text, summarize_financial_report, summarize_financial_report_text
 from disciplineos.services import DisciplineService
 
@@ -85,6 +86,8 @@ def test_service_uses_ai_information_analysis_when_enabled(tmp_path: Path, monke
             "ai_api_token": "token",
             "ai_api_base_url": "https://api.example.test/v1",
             "ai_model": "test-model",
+            "ai_cost_per_1k_input_usd": 0.01,
+            "ai_cost_per_1k_output_usd": 0.02,
         }
     )
 
@@ -101,6 +104,11 @@ def test_service_uses_ai_information_analysis_when_enabled(tmp_path: Path, monke
                 "lower_position": ["Cash flow diverges from profit."],
             },
             "evidence_summary": ["AI extracted evidence."],
+            "_ai_usage": {
+                "prompt_tokens": 1000,
+                "completion_tokens": 500,
+                "total_tokens": 1500,
+            },
         }
 
     monkeypatch.setattr(
@@ -119,6 +127,10 @@ def test_service_uses_ai_information_analysis_when_enabled(tmp_path: Path, monke
         "Cash flow and profit quality both improve."
     ]
     assert service.list_ai_runs()[0]["agent_type"] == "info_analysis"
+    accounting = service.list_ai_runs()[0]["output"]["_ai_accounting"]
+    assert accounting["usage"]["total_tokens"] == 1500
+    assert accounting["estimated_cost_usd"] == 0.02
+    assert service.ai_usage_summary()["estimated_cost_usd"] == 0.02
 
 
 def test_service_falls_back_to_local_rules_when_ai_config_missing(tmp_path: Path) -> None:
@@ -134,6 +146,68 @@ def test_service_falls_back_to_local_rules_when_ai_config_missing(tmp_path: Path
     assert result["analysis_mode"] == "local_rules"
     assert result["ai_status"] == "failed"
     assert "Token" in result["ai_error"]
+
+
+def test_service_blocks_ai_when_monthly_budget_is_exhausted(tmp_path: Path, monkeypatch) -> None:
+    service = DisciplineService(tmp_path)
+    service.save_settings(
+        {
+            "storage_mode": "sqlite",
+            "ai_enabled": True,
+            "strict_mode": True,
+            "ai_api_token": "token",
+            "ai_api_base_url": "https://api.example.test/v1",
+            "ai_model": "test-model",
+            "ai_monthly_budget_usd": 0.01,
+            "ai_cost_per_1k_input_usd": 0.01,
+            "ai_cost_per_1k_output_usd": 0.02,
+        }
+    )
+    service.save_ai_run(
+        agent_type="info_analysis",
+        input_payload={"seed": True},
+        output_payload={"ok": True},
+        compliance_status="pass",
+        ai_enabled=True,
+        usage={"prompt_tokens": 1000, "completion_tokens": 0, "total_tokens": 1000},
+        estimated_cost_usd=0.01,
+    )
+
+    def should_not_call_ai(**kwargs):
+        raise AssertionError("AI should not be called after budget is exhausted")
+
+    monkeypatch.setattr(
+        "disciplineos.services.analyze_information_with_ai",
+        should_not_call_ai,
+    )
+
+    result = service.summarize_financial_report_text(
+        {"symbol": "SAMPLE", "period": "2026Q1", "text": REPORT_TEXT}
+    )
+
+    assert result["analysis_mode"] == "local_rules"
+    assert result["ai_status"] == "failed"
+    assert "monthly budget exceeded" in result["ai_error"]
+
+
+def test_cli_reports_ai_usage(tmp_path: Path, capsys) -> None:
+    service = DisciplineService(tmp_path)
+    service.save_ai_run(
+        agent_type="info_analysis",
+        input_payload={"sample": True},
+        output_payload={"ok": True},
+        compliance_status="pass",
+        ai_enabled=True,
+        usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        estimated_cost_usd=0.123,
+    )
+
+    exit_code = main(["ai-usage", "--data-dir", str(tmp_path)])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert '"run_count": 1' in output
+    assert '"estimated_cost_usd": 0.123' in output
 
 
 def write_minimal_docx(path: Path, text: str) -> None:

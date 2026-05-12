@@ -394,6 +394,12 @@ disciplineos backup --data-dir .\data --passphrase "your-passphrase"
 disciplineos restore disciplineos-backup-xxx.zip --data-dir .\data --passphrase "your-passphrase"
 ```
 
+查看 AI 用量与估算成本：
+
+```powershell
+disciplineos ai-usage --data-dir .\data
+```
+
 运行测试：
 
 ```powershell
@@ -540,7 +546,7 @@ src/disciplineos/
 - 当前没有内置 AI 模型，也没有离线大模型；启用 AI 前需要用户自己配置可用的 API URL、模型名和 Token。
 - AI Token、TuShare Token 等敏感配置当前保存在本地数据库中，尚未接入系统密钥库或加密存储。
 - AI 输出有合规护栏，但无法保证第三方模型永远不产生不当内容；最终状态仍应以规则引擎为准。
-- 没有内置模型调用成本统计、额度控制、请求队列和失败重试策略。
+- AI 运行记录包含 token 用量、估算成本、月度预算控制和失败重试；但尚未提供异步请求队列、Provider 专属价格表和可视化额度管理。
 - 当前没有登录、二次认证、密钥权限隔离和敏感字段脱敏展示。
 
 ### 决策、交易与风控

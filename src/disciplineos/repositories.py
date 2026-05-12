@@ -37,6 +37,10 @@ class DisciplineRepository:
             "ai_api_token",
             "ai_api_base_url",
             "ai_model",
+            "ai_max_retries",
+            "ai_monthly_budget_usd",
+            "ai_cost_per_1k_input_usd",
+            "ai_cost_per_1k_output_usd",
         ):
             if key in settings:
                 self.store.set_setting(key, settings[key])
