@@ -38,6 +38,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     review_parser.add_argument("--month", required=True, help="Month in YYYY-MM format.")
 
+    subparsers.add_parser(
+        "migrations",
+        parents=[common],
+        help="Show local SQLite schema migration status.",
+    )
+
     web_parser = subparsers.add_parser(
         "web",
         parents=[common],
@@ -62,6 +68,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "review":
         print_json(service.monthly_review(args.month))
+        return 0
+
+    if args.command == "migrations":
+        print_json(service.schema_status())
         return 0
 
     if args.command == "web":

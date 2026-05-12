@@ -99,6 +99,12 @@ class DisciplineRepository:
     def market_data_summary(self) -> dict[str, Any]:
         return self.store.market_data_summary()
 
+    def list_schema_migrations(self) -> list[dict[str, Any]]:
+        return self.store.list_schema_migrations()
+
+    def schema_status(self) -> dict[str, Any]:
+        return self.store.schema_status()
+
     def save_evidence(self, item: dict[str, Any]) -> dict[str, Any]:
         return self.store.save_evidence(item)
 

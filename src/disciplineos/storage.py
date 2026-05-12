@@ -9,6 +9,14 @@ from pathlib import Path
 from typing import Any
 
 
+SCHEMA_MIGRATIONS = (
+    {
+        "version": "0001_sqlite_baseline",
+        "description": "Baseline SQLite schema for local DisciplineOS storage.",
+    },
+)
+
+
 class JsonStore:
     def __init__(self, data_dir: Path | str) -> None:
         self.data_dir = Path(data_dir)
@@ -455,6 +463,35 @@ class SQLiteStore:
             "top_symbols": [dict(row) for row in by_symbol],
         }
 
+    def list_schema_migrations(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                select version, description, applied_at
+                from schema_migrations
+                order by version
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def schema_status(self) -> dict[str, Any]:
+        applied = self.list_schema_migrations()
+        applied_versions = {item["version"] for item in applied}
+        known_versions = [item["version"] for item in SCHEMA_MIGRATIONS]
+        pending = [
+            item
+            for item in SCHEMA_MIGRATIONS
+            if item["version"] not in applied_versions
+        ]
+        return {
+            "current_version": applied[-1]["version"] if applied else "",
+            "latest_known_version": known_versions[-1] if known_versions else "",
+            "applied_count": len(applied),
+            "pending_count": len(pending),
+            "applied": applied,
+            "pending": pending,
+        }
+
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
@@ -464,6 +501,11 @@ class SQLiteStore:
         with self._connect() as conn:
             conn.executescript(
                 """
+                create table if not exists schema_migrations (
+                    version text primary key,
+                    description text not null default '',
+                    applied_at text not null
+                );
                 create table if not exists json_documents (
                     name text primary key,
                     data_json text not null,
@@ -599,6 +641,20 @@ class SQLiteStore:
                     values (?, ?, ?)
                     """,
                     (key, json.dumps(value), _utc_now()),
+                )
+            for migration in SCHEMA_MIGRATIONS:
+                conn.execute(
+                    """
+                    insert or ignore into schema_migrations(
+                        version, description, applied_at
+                    )
+                    values (?, ?, ?)
+                    """,
+                    (
+                        migration["version"],
+                        migration["description"],
+                        _utc_now(),
+                    ),
                 )
 
     def _test_provider(self, provider_type: str, config: dict[str, Any]) -> dict[str, str]:

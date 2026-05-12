@@ -128,6 +128,12 @@ class DisciplineService:
     def market_data_summary(self) -> dict:
         return self.repository.market_data_summary()
 
+    def list_schema_migrations(self) -> list[dict]:
+        return self.repository.list_schema_migrations()
+
+    def schema_status(self) -> dict:
+        return self.repository.schema_status()
+
     def update_position_prices_from_market_data(
         self,
         symbols: list[str] | None = None,
@@ -494,6 +500,17 @@ class DisciplineService:
             "Local backup archive",
             "WARN" if not backups else "PASS",
             f"{len(backups)} backup archives found.",
+        )
+        schema_status = self.schema_status()
+        _add_health_check(
+            checks,
+            "storage",
+            "Schema migrations",
+            "WARN" if schema_status["pending_count"] else "PASS",
+            (
+                f"{schema_status['applied_count']} migrations applied; "
+                f"current version {schema_status['current_version'] or 'none'}."
+            ),
         )
 
         sources = self.list_data_sources()

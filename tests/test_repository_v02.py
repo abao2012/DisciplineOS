@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from disciplineos.cli import main
 from disciplineos.services import DisciplineService
 
 
@@ -21,6 +22,32 @@ def test_sqlite_store_is_created_and_keeps_legacy_json_export(tmp_path: Path) ->
     assert (tmp_path / "disciplineos.db").exists()
     assert (tmp_path / "profile.json").exists()
     assert service.load_profile().name == "tester"
+
+
+def test_schema_migration_status_is_recorded(tmp_path: Path) -> None:
+    service = DisciplineService(tmp_path)
+
+    status = service.schema_status()
+    migrations = service.list_schema_migrations()
+    health = service.data_health_check()
+
+    assert status["current_version"] == "0001_sqlite_baseline"
+    assert status["latest_known_version"] == "0001_sqlite_baseline"
+    assert status["pending_count"] == 0
+    assert migrations[0]["description"].startswith("Baseline SQLite schema")
+    assert any(
+        item["title"] == "Schema migrations" and item["status"] == "PASS"
+        for item in health["checks"]
+    )
+
+
+def test_cli_reports_schema_migrations(tmp_path: Path, capsys) -> None:
+    exit_code = main(["migrations", "--data-dir", str(tmp_path)])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "0001_sqlite_baseline" in output
+    assert '"pending_count": 0' in output
 
 
 def test_settings_and_data_source_configuration_persist(tmp_path: Path) -> None:

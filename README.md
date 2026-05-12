@@ -370,6 +370,12 @@ disciplineos check .\examples\sample_decision.json --data-dir .\data
 disciplineos review --month 2026-05 --data-dir .\data
 ```
 
+查看本地数据库迁移状态：
+
+```powershell
+disciplineos migrations --data-dir .\data
+```
+
 运行测试：
 
 ```powershell
@@ -538,7 +544,7 @@ src/disciplineos/
 - 默认使用本地 SQLite + JSON 兼容写入；设置里的 PostgreSQL 仍属于未来选项，后端尚未真正接入。
 - 本地备份/恢复可用，但没有云同步、跨设备同步、自动备份计划和备份加密。
 - 没有生产部署方案、HTTPS、反向代理配置、服务守护进程或安装器。
-- 没有数据迁移版本管理工具，长期升级时仍需要补正式 migration 机制。
+- SQLite 已记录基础 schema migration 状态，并可通过 `disciplineos migrations` 查看；但还没有迁移回滚、跨大版本升级向导和独立迁移脚本目录。
 - 本地数据库、备份包和导入文件可能包含真实交易、持仓、Token、本地路径等敏感信息，公开上传前必须排除。
 
 ### 前端与工程化
@@ -546,7 +552,7 @@ src/disciplineos/
 - Web UI 已可用，但仍是本地工作台形态，移动端适配、无障碍、快捷键和复杂交互还不完整。
 - 中英文切换覆盖主要界面，但动态文本和少数历史文案仍可能存在遗漏。
 - 目前有后端单元测试，但缺少浏览器端 E2E 测试、视觉回归测试和真实数据源集成测试。
-- 尚未配置 GitHub Actions、自动发布、打包构建和版本发布流程。
+- 已配置 GitHub Actions 基础测试工作流；但尚未配置自动发布、打包构建和版本发布流程。
 - 代码中 `services.py` 仍偏大，后续需要继续拆分 DataSource、Decision、Review、Backup 等服务边界。
 - 当前发布方式仍以源码运行为主，没有 Windows 桌面安装包、自动更新和版本迁移向导。
 
